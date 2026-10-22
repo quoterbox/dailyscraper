@@ -13,6 +13,7 @@ dist/
 .test.env
 *.local.json
 .secrets.*
+roadmaps/local/
 
 # Runtime data
 data/

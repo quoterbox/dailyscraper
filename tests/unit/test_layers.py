@@ -1,4 +1,4 @@
-"""Enforce the package dependency rule from roadmaps/plan.md, section 4.2."""
+"""The package dependency rule from roadmaps/plan.md, section 4.2."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 PACKAGE = "dailyscraper"
 PACKAGE_ROOT = Path(__file__).resolve().parents[2] / PACKAGE
 
-# A package may import only packages of its own level or below.
 LAYER_LEVELS = {
     "domain": 0,
     "schema": 1,
@@ -32,7 +31,6 @@ LAYER_LEVELS = {
     "app": 7,
 }
 
-# Edges the levels alone would allow but the architecture forbids.
 FORBIDDEN_EDGES = {
     "storage": {"execution", "pipelines", "page_scrapers", "actions"},
 }

@@ -1,7 +1,4 @@
-"""Isolate every pytest session before any project module reads the environment.
-
-Loaded as a pytest plugin (``-p tests.bootstrap``) so it runs before collection.
-"""
+"""Loaded as a pytest plugin (``-p tests.bootstrap``) so it runs before collection."""
 
 from __future__ import annotations
 
@@ -23,8 +20,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SESSION_ID = datetime.now().strftime("%y%m%d-%H%M%S") + f"-{os.getpid()}"
 DEFAULT_WORKSPACE = (PROJECT_ROOT / ".test-artifacts" / SESSION_ID).resolve()
 PROJECT_ENV_PREFIX = "DAILYSCRAPER_"
-# An explicitly configured workspace may be inherited; any other project
-# variable (settings overrides, fault plans) must not leak into tests.
 INHERITED_VARIABLES = frozenset({TEST_WORKSPACE_VARIABLE, TEST_CONFIG_ROOT_VARIABLE})
 
 _owns_default_workspace = False
@@ -36,9 +31,8 @@ def _bootstrap_testing_environment() -> None:
     for name in tuple(os.environ):
         if name.startswith(PROJECT_ENV_PREFIX) and name not in INHERITED_VARIABLES:
             os.environ.pop(name, None)
-    # Antivirus HTTPS scanners (Avast/AVG) set SSLKEYLOGFILE to a device path;
-    # the standalone CPython builds used by uv on Windows then abort inside
-    # OpenSSL ("no OPENSSL_Applink") on the first TLS connection.
+    # Antivirus HTTPS scanners may point SSLKEYLOGFILE at a device path; uv's CPython
+    # builds on Windows then abort in OpenSSL ("no OPENSSL_Applink") on the first TLS call.
     os.environ.pop("SSLKEYLOGFILE", None)
     os.environ[ENVIRONMENT_VARIABLE] = TESTING_ENVIRONMENT
 

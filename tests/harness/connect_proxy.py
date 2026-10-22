@@ -17,8 +17,6 @@ class ConnectProxyEndpoint:
 
 
 class ProgrammableConnectProxy:
-    """Small test-only HTTP CONNECT proxy with deterministic behavior."""
-
     def __init__(self, mode: ConnectProxyMode) -> None:
         self.mode = mode
         handler = _handler_for(mode)

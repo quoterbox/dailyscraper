@@ -1,5 +1,3 @@
-"""Runtime activation, cross-process claims and evidence for fault plans."""
-
 from __future__ import annotations
 
 import errno
@@ -47,7 +45,7 @@ NULL_FAULT_INJECTOR = NullFaultInjector()
 
 
 class PlannedFaultInjector:
-    """Activate plan rules; claims are files, so ``times`` holds across processes."""
+    """Activations are claimed as files, so a rule's ``times`` limit holds across processes."""
 
     def __init__(
         self,
@@ -166,8 +164,6 @@ class PlannedFaultInjector:
 
 
 def get_fault_injector() -> FaultInjector:
-    """Return the active injector; outside an explicit test plan it is a no-op."""
-
     plan_value = str(os.getenv(FAULT_PLAN_VARIABLE) or "").strip()
     if not plan_value:
         return NULL_FAULT_INJECTOR

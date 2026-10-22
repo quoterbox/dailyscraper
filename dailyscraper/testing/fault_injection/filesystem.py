@@ -1,5 +1,3 @@
-"""Filesystem fault points shared by atomic artifact writers."""
-
 from __future__ import annotations
 
 from pathlib import Path

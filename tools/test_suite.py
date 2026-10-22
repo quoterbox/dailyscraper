@@ -1,5 +1,3 @@
-"""Run one documented pytest profile: uv run python tools/test_suite.py <suite>."""
-
 from __future__ import annotations
 
 import argparse

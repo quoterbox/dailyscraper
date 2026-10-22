@@ -1,5 +1,3 @@
-"""Typed JSON schema for deterministic fault plans."""
-
 from __future__ import annotations
 
 import errno
@@ -49,7 +47,6 @@ FILESYSTEM_POINTS = frozenset(
     }
 )
 
-# DELAY is allowed at every point; every other fault only where it is meaningful.
 ALLOWED_POINTS: dict[FaultType, frozenset[FaultPoint]] = {
     FaultType.NAVIGATION_TIMEOUT: frozenset({FaultPoint.NAVIGATION_BEFORE_OPEN}),
     FaultType.HTTP_STATUS: frozenset({FaultPoint.NAVIGATION_AFTER_OPEN}),

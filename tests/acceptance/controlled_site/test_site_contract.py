@@ -1,5 +1,3 @@
-"""The controlled site still serves the data contract the acceptance tests rely on."""
-
 from __future__ import annotations
 
 import json

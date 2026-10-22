@@ -1,9 +1,3 @@
-"""Environment selection and the safety rules of the testing environment.
-
-The testing environment never touches development data: every path a test run
-writes to must live inside an explicit, isolated workspace.
-"""
-
 from __future__ import annotations
 
 import os
@@ -19,7 +13,6 @@ TEST_WORKSPACE_VARIABLE = "DAILYSCRAPER_TEST_WORKSPACE"
 TEST_CONFIG_ROOT_VARIABLE = "DAILYSCRAPER_TEST_CONFIG_ROOT"
 TEST_SESSION_ID_VARIABLE = "DAILYSCRAPER_TEST_SESSION_ID"
 
-# Development paths a testing workspace must never overlap.
 PROTECTED_DEVELOPMENT_PATHS = (
     Path("config") / DEVELOPMENT_ENVIRONMENT,
     Path("data"),
