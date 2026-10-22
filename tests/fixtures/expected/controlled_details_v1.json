@@ -1,0 +1,24 @@
+{
+    "dataset_version": 1,
+    "input_rows": 1,
+    "normal_product": {
+        "source_id": "controlled:hoody",
+        "item_name": "DScrapper Hoody",
+        "detail_link": "https://dailyscraper.com/tests/product/dscrapper-hoody/",
+        "detail_name": "DScrapper Hoody",
+        "sku": "hd1",
+        "description": "The best hoody of DScrapper company",
+        "selected_color": "Black",
+        "selected_size": "XS",
+        "property_attributes_original": "yes",
+        "property_attributes_brand_new": "no",
+        "property_attributes_country": "UK",
+        "property_attributes_temperature": "18",
+        "property_attributes_brand_name": "LuxoPulse"
+    },
+    "missing_product": {
+        "source_id": "controlled:missing",
+        "item_name": "Missing controlled product",
+        "detail_link": "https://dailyscraper.com/tests/product/controlled-missing-product/"
+    }
+}

@@ -1,0 +1,27 @@
+# Python and tooling
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Secrets and local overrides
+.env
+.test.env
+*.local.json
+.secrets.*
+
+# Runtime data
+data/
+logs/
+temp/
+*.sqlite*
+.test-artifacts/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
