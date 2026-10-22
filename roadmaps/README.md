@@ -45,3 +45,6 @@
 | [0005](decisions/0005-uv-ruff-python-313.md) | uv, ruff, Python 3.13 | принято |
 | [0006](decisions/0006-roadmaps-as-project-memory.md) | `roadmaps/` как память проекта | принято |
 | [0007](decisions/0007-public-and-local-roadmaps.md) | Публичная и локальная части `roadmaps/` | принято |
+| [0008](decisions/0008-scraper-json-v3.md) | Формат `scraper.json` v3 | принято |
+| [0009](decisions/0009-scraper-actions-hooks.md) | Hooks `ScraperActions` | принято |
+| [0010](decisions/0010-settings-loading.md) | Загрузка настроек без Dynaconf | принято |

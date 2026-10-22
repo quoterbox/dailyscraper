@@ -1,0 +1,110 @@
+{
+    "controlled_catalog": {
+        "website": "https://dailyscraper.com",
+        "page_discovery": {
+            "enabled": false
+        },
+        "page_state": {
+            "common": {
+                "wait_attempts": 3,
+                "wait_interval_ms": 250,
+                "reload_wait_ms": 500,
+                "activity_after_open": false,
+                "activity_after_reload": false
+            },
+            "catalog": {
+                "reload_attempts": 0,
+                "empty_text_markers": [
+                    "No products were found matching your selection"
+                ]
+            }
+        },
+        "proxy_check": {
+            "enabled": false
+        },
+        "navigation": {
+            "warmup_urls": [],
+            "open_target_after_warmup": true,
+            "delay_after_warmup": [0, 0]
+        },
+        "options": {
+            "links": [
+                "https://dailyscraper.com/tests/"
+            ]
+        },
+        "xpath_options": {
+            "paginator": {
+                "infinity_loading": false,
+                "detail_page_by_click": false,
+                "wait_for_changing_content": true,
+                "max_the_same_content_pages": 1,
+                "start_page": 1,
+                "last_page": 3,
+                "save_start_link": true,
+                "next_page_link": {
+                    "CSS": "a.next.page-numbers",
+                    "WAIT": 1
+                },
+                "by_url": {
+                    "change_by_url": true,
+                    "template": "{URL}page/{page}/"
+                }
+            },
+            "list_page": [
+                {
+                    "template_name": "controlled_catalog",
+                    "list_page_waiting_tag": {
+                        "CSS": "ul.products > li.product"
+                    },
+                    "first_item": {
+                        "item_body": {
+                            "CSS": "ul.products > li.product"
+                        },
+                        "list_fields": {
+                            "item_name": {
+                                "CSS": ".oa-single-product__title"
+                            },
+                            "detail_link": {
+                                "CSS": ".oa-single-product__title a"
+                            },
+                            "category": {
+                                "CSS": ".oa-single-product__cats"
+                            },
+                            "price": {
+                                "CSS": ".oa-single-product__price"
+                            },
+                            "image_link": {
+                                "CSS": ".oa-single-product__head img",
+                                "ATTRIBUTE": "src"
+                            }
+                        }
+                    },
+                    "second_item": {
+                        "item_body": {
+                            "CSS": "ul.products > li.product"
+                        },
+                        "list_fields": {}
+                    }
+                }
+            ]
+        },
+        "time_options": {
+            "delay_before_open_next_page": [0, 0],
+            "delay_before_close": [0, 0],
+            "delay_between_list_item": [0, 0],
+            "wait_next_page_button": 1,
+            "wait_item_body": 2,
+            "wait_list_item": 2,
+            "wait_list_item_field": 1,
+            "wait_last_page": 2
+        },
+        "scroll_options": {
+            "scroll_origin_x_offset": [0, 0],
+            "scroll_origin_y_offset": [0, 0],
+            "scroll_delta_x": [0, 0],
+            "scroll_delta_y": [0, 0],
+            "scroll_to_list_items": false,
+            "scroll_to_detail_fields": false
+        }
+    }
+}

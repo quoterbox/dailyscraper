@@ -1,0 +1,7 @@
+{
+    "paths": {
+        "data": "${env:DAILYSCRAPER_TEST_WORKSPACE}/data",
+        "logs": "${env:DAILYSCRAPER_TEST_WORKSPACE}/logs",
+        "scrapers": "tests/scrapers"
+    }
+}

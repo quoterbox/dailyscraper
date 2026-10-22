@@ -1,0 +1,152 @@
+{
+    "controlled_details": {
+        "website": "https://dailyscraper.com",
+        "page_discovery": {
+            "enabled": false
+        },
+        "page_state": {
+            "common": {
+                "wait_attempts": 3,
+                "wait_interval_ms": 250,
+                "reload_wait_ms": 500,
+                "activity_after_open": false,
+                "activity_after_reload": false
+            },
+            "detail": {
+                "reload_attempts": 0,
+                "ready_mode": "any",
+                "prefer_ready_selectors": true,
+                "ready_selectors": [
+                    {
+                        "CSS": "h1.product_title"
+                    }
+                ],
+                "json_ld_types": [
+                    "Product"
+                ],
+                "not_found_selectors": [
+                    {
+                        "CSS": "body.error404"
+                    }
+                ],
+                "not_found_text_markers": [
+                    "Ow!"
+                ]
+            }
+        },
+        "proxy_check": {
+            "enabled": false
+        },
+        "navigation": {
+            "warmup_urls": [],
+            "open_target_after_warmup": true,
+            "delay_after_warmup": [0, 0]
+        },
+        "options": {
+            "links": []
+        },
+        "xpath_options": {
+            "paginator": {
+                "infinity_loading": false,
+                "detail_page_by_click": false,
+                "start_page": 1,
+                "last_page": 1,
+                "detail_last_item": 100,
+                "next_page_link": {
+                    "CSS": "a.next.page-numbers",
+                    "WAIT": 0
+                },
+                "by_url": {
+                    "change_by_url": false,
+                    "template": ""
+                }
+            },
+            "list_page": [],
+            "detail_page": {
+                "detail_page_waiting_tag": {
+                    "CSS": "h1.product_title",
+                    "WAIT": 3
+                },
+                "detail_fields": {
+                    "detail_name": {
+                        "CSS": "h1.product_title",
+                        "WAIT": 1
+                    },
+                    "sku": {
+                        "CSS": ".sku",
+                        "WAIT": 1
+                    },
+                    "description": {
+                        "CSS": ".woocommerce-product-details__short-description",
+                        "WAIT": 1
+                    },
+                    "selected_color": {
+                        "CSS": "#pa_color option:checked",
+                        "WAIT": 0
+                    },
+                    "selected_size": {
+                        "CSS": "#pa_size option:checked",
+                        "WAIT": 0
+                    }
+                },
+                "detail_properties": {
+                    "attributes": {
+                        "list_body": {
+                            "CSS": "table.woocommerce-product-attributes tbody",
+                            "WAIT": 1
+                        },
+                        "first_item": {
+                            "item_body": {
+                                "CSS": "tr",
+                                "WAIT": 0
+                            },
+                            "list_fields": {
+                                "field_name": {
+                                    "CSS": "th",
+                                    "WAIT": 0
+                                },
+                                "field_value": {
+                                    "CSS": "td",
+                                    "WAIT": 0
+                                }
+                            }
+                        },
+                        "list_fields": {
+                            "original": {
+                                "field_name": "original"
+                            },
+                            "brand_new": {
+                                "field_name": "brand new"
+                            },
+                            "country": {
+                                "field_name": "country"
+                            },
+                            "temperature": {
+                                "field_name": "temperature"
+                            },
+                            "brand_name": {
+                                "field_name": "brand name"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "time_options": {
+            "delay_between_detail_item": [0, 0],
+            "delay_before_close": [0, 0],
+            "wait_item_body": 2,
+            "wait_detail_page": 3,
+            "wait_detail_field": 1,
+            "wait_detail_property": 1
+        },
+        "scroll_options": {
+            "scroll_origin_x_offset": [0, 0],
+            "scroll_origin_y_offset": [0, 0],
+            "scroll_delta_x": [0, 0],
+            "scroll_delta_y": [0, 0],
+            "scroll_to_list_items": false,
+            "scroll_to_detail_fields": false
+        }
+    }
+}

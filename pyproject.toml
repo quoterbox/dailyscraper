@@ -4,7 +4,10 @@ version = "0.0.0"
 description = "Browser-based scraping framework for product catalogs and detail pages"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.9",
+    "python-dotenv>=1.0",
+]
 
 [dependency-groups]
 dev = [

@@ -1,0 +1,145 @@
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from dotenv import dotenv_values
+from pydantic import ValidationError
+
+from dailyscraper.settings.environment import (
+    TESTING_ENVIRONMENT,
+    EnvironmentPaths,
+    resolve_environment_paths,
+)
+from dailyscraper.settings.interpolation import MissingVariableError, interpolate_env
+from dailyscraper.settings.models import Settings
+
+OVERRIDE_PREFIX = "DAILYSCRAPER__"
+LOCAL_SUFFIX = ".local.json"
+WORKSPACE_BOUND_PATHS = ("data", "logs")
+
+
+class SettingsError(ValueError):
+    pass
+
+
+def load_variables(environment: EnvironmentPaths) -> dict[str, str]:
+    file_values = {
+        name: value
+        for name, value in dotenv_values(environment.env_file).items()
+        if value is not None
+    }
+    return {**file_values, **os.environ}
+
+
+def load_settings(project_root: Path) -> Settings:
+    root = Path(project_root).resolve()
+    environment = resolve_environment_paths(root)
+    variables = load_variables(environment)
+
+    raw: dict[str, Any] = {}
+    for directory in _config_directories(root, environment):
+        for path in _config_files(directory):
+            _deep_merge(raw, _read_json(path))
+    for path, value in _overrides(os.environ):
+        _set_path(raw, path, value)
+
+    try:
+        raw = interpolate_env(raw, variables)
+        settings = Settings.model_validate(
+            {**raw, "environment": environment.name, "project_root": root}
+        )
+    except MissingVariableError as error:
+        raise SettingsError(error.args[0]) from error
+    except ValidationError as error:
+        raise SettingsError(f"invalid settings for {environment.name!r}:\n{error}") from error
+
+    settings = _resolve_paths(settings, root)
+    if environment.name == TESTING_ENVIRONMENT:
+        _require_inside_workspace(settings, environment.test_workspace)
+    return settings
+
+
+def _config_directories(root: Path, environment: EnvironmentPaths) -> list[Path]:
+    directories = [root / "config" / environment.name]
+    if not directories[0].is_dir():
+        raise SettingsError(f"configuration directory {directories[0]} does not exist")
+    if environment.test_config_root is not None:
+        directories.append(environment.test_config_root)
+    return directories
+
+
+def _config_files(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    files = sorted(directory.glob("*.json"))
+    base = [path for path in files if not path.name.endswith(LOCAL_SUFFIX)]
+    local = [path for path in files if path.name.endswith(LOCAL_SUFFIX)]
+    return base + local
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise SettingsError(f"{path} is not valid JSON: {error}") from error
+    if not isinstance(data, dict):
+        raise SettingsError(f"{path} must contain a JSON object")
+    return data
+
+
+def _deep_merge(target: dict[str, Any], source: Mapping[str, Any]) -> None:
+    for key, value in source.items():
+        if isinstance(value, Mapping) and isinstance(target.get(key), dict):
+            _deep_merge(target[key], value)
+        else:
+            target[key] = value
+
+
+def _overrides(environ: Mapping[str, str]) -> list[tuple[list[str], Any]]:
+    overrides = []
+    for name, value in sorted(environ.items()):
+        if not name.startswith(OVERRIDE_PREFIX):
+            continue
+        path = [part.lower() for part in name[len(OVERRIDE_PREFIX) :].split("__")]
+        if not all(path):
+            raise SettingsError(f"malformed settings override variable {name}")
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = value
+        overrides.append((path, parsed))
+    return overrides
+
+
+def _set_path(target: dict[str, Any], path: list[str], value: Any) -> None:
+    node = target
+    for part in path[:-1]:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = node[part] = {}
+        node = child
+    node[path[-1]] = value
+
+
+def _resolve_paths(settings: Settings, root: Path) -> Settings:
+    resolved = {
+        name: (path if path.is_absolute() else root / path).resolve()
+        for name, path in settings.paths.model_dump().items()
+    }
+    return settings.model_copy(update={"paths": settings.paths.model_copy(update=resolved)})
+
+
+def _require_inside_workspace(settings: Settings, workspace: Path | None) -> None:
+    if workspace is None:
+        raise SettingsError("the testing environment requires a test workspace")
+    outside = [
+        f"paths.{name}={getattr(settings.paths, name)}"
+        for name in WORKSPACE_BOUND_PATHS
+        if not getattr(settings.paths, name).is_relative_to(workspace)
+    ]
+    if outside:
+        raise SettingsError(f"testing paths must be inside {workspace}: {', '.join(outside)}")

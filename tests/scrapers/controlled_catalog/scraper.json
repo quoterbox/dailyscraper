@@ -1,0 +1,95 @@
+{
+    "schema_version": 3,
+    "name": "controlled_catalog",
+    "website": "https://dailyscraper.com",
+    "links": [
+        {
+            "id": "main",
+            "type": "list",
+            "urls": ["https://dailyscraper.com/tests/"]
+        }
+    ],
+    "navigation": {
+        "warmup_urls": [],
+        "open_target_after_warmup": true,
+        "delay_after_warmup": [0, 0]
+    },
+    "page_state": {
+        "wait_attempts": 3,
+        "wait_interval_ms": 250,
+        "reload_wait_ms": 500,
+        "activity_after_open": false,
+        "activity_after_reload": false
+    },
+    "discovery": {
+        "enabled": false
+    },
+    "pages": {
+        "list": {
+            "templates": [
+                {
+                    "name": "controlled_catalog",
+                    "ready": {
+                        "css": "ul.products > li.product"
+                    },
+                    "first_item": {
+                        "body": {
+                            "css": "ul.products > li.product"
+                        },
+                        "fields": {
+                            "item_name": {
+                                "css": ".oa-single-product__title"
+                            },
+                            "detail_link": {
+                                "css": ".oa-single-product__title a"
+                            },
+                            "category": {
+                                "css": ".oa-single-product__cats"
+                            },
+                            "price": {
+                                "css": ".oa-single-product__price"
+                            },
+                            "image_link": {
+                                "css": ".oa-single-product__head img",
+                                "attribute": "src"
+                            }
+                        }
+                    },
+                    "second_item": {
+                        "body": {
+                            "css": "ul.products > li.product"
+                        }
+                    },
+                    "next_page": {
+                        "css": "a.next.page-numbers",
+                        "wait": 1
+                    }
+                }
+            ],
+            "pagination": {
+                "start_page": 1,
+                "last_page": 3,
+                "infinity_loading": false,
+                "wait_for_changing_content": true,
+                "max_same_content_pages": 1,
+                "url_template": "{url}page/{page}/"
+            },
+            "save_start_link": true,
+            "waits": {
+                "item_body": 2,
+                "item": 2,
+                "field": 1,
+                "next_page": 1,
+                "last_page": 2
+            },
+            "delays": {
+                "before_next_page": [0, 0],
+                "between_items": [0, 0]
+            },
+            "state": {
+                "reload_attempts": 0,
+                "empty_text_markers": ["No products were found matching your selection"]
+            }
+        }
+    }
+}

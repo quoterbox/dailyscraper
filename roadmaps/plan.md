@@ -78,10 +78,10 @@ Slot-процесс (один Chromium на пару site+proxy, много за
 
 ```
 dailyscraper/
-  domain/         ids, tasks, outcomes, errors, selectors, proxy — чистые типы без I/O
+  domain/         исходы страниц и задач, категории ошибок, задачи, proxy id — чистые типы без I/O
   settings/       окружение, загрузка config/<env>/*.json, неизменяемый снимок
-  schema/         модели scraper.json v3, runtime, workload
-  pages/          модели страниц: Page, ListPage, DetailPage, AuthPage        ← SDK
+  schema/         модели scraper.json v3, runtime, workload; загрузка пакета парсера
+  pages/          модели страниц, селекторы, XPath, компиляция templates          ← SDK
   page_scrapers/  исполнители List / Detail / Auth, registry, стратегии
   pipelines/      DefaultPipeline, PipelineContext                            ← SDK
   actions/        ScraperActions (hooks)                                      ← SDK
@@ -131,6 +131,11 @@ tests/            unit, integration, acceptance, harness, fixtures
 Правило проверяет `tests/unit/test_layers.py` (AST-разбор импортов).
 
 ## 5. Доменная модель (`dailyscraper/domain`)
+
+Типы появляются вместе с первыми потребителями: на этапе 1 — `ErrorCategory`,
+`PageType`, `PageState` (с переходным `LOADING`) и `PageOutcome`; задачи,
+attempts и `ProxyId` — на этапах 3–5. Селекторы — конфигурация страницы и живут
+в `pages/` ([0008](decisions/0008-scraper-json-v3.md)).
 
 ```python
 class TaskKind(StrEnum):
@@ -406,7 +411,10 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 ## 8. Конфигурация
 
 `config/<env>/*.json`, окружение выбирает `DAILYSCRAPER_ENV`
-(`development` по умолчанию, `testing` для тестов).
+(`development` по умолчанию, `testing` для тестов). Порядок источников,
+`*.local.json`, переопределения `DAILYSCRAPER__…` и `${env:NAME}` —
+[0010](decisions/0010-settings-loading.md). Секции появляются вместе с их
+потребителями; сейчас есть `paths` и `scrapers`.
 
 | Файл | Содержание |
 |---|---|
@@ -421,28 +429,38 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 | `output.json` | Форматы и путь итогового экспорта |
 | `storage.json` | Retention |
 
-`scraper.json` v3 ([0003](decisions/0003-separate-scrapers-repository.md)):
+`scraper.json` v3 — [0008](decisions/0008-scraper-json-v3.md), пакет парсера —
+[0003](decisions/0003-separate-scrapers-repository.md), hooks —
+[0009](decisions/0009-scraper-actions-hooks.md). Примеры —
+`tests/scrapers/controlled_catalog/` и `tests/scrapers/controlled_details/`.
 
 ```json
 {
   "schema_version": 3,
   "name": "example_catalog",
   "website": "https://example.com",
-  "links": [{"id": "main", "type": "list", "urls": []}],
+  "links": [{"id": "main", "type": "list", "urls": ["https://example.com/catalog/"]}],
   "navigation": {"warmup_urls": [], "open_target_after_warmup": true},
-  "health_check": {"url": "…", "min_items": 1, "required_fields": []},
+  "health_check": {"urls": ["…"], "min_items": 1, "required_fields": []},
   "discovery": {"enabled": true, "empty_confirmations": 2},
   "inputs": {"detail_link_field": "detail_link", "identity_fields": []},
-  "page_state": {"common": {}},
+  "page_state": {"wait_attempts": 3},
   "pages": {
-    "list":   {"state": {}, "templates": []},
-    "detail": {"state": {}, "templates": []},
-    "auth":   {"templates": []}
-  }
+    "list": {
+      "templates": [{
+        "name": "grid",
+        "first_item": {"body": {"css": "li.product"}, "fields": {"name": {"css": ".title"}}},
+        "next_page": {"css": "a.next"}
+      }],
+      "pagination": {"start_page": 1, "last_page": 0, "url_template": "{url}page/{page}/"}
+    },
+    "detail": {
+      "templates": [{"name": "detail", "fields": {"title": {"selectors": [{"xpath": "//h1"}, {"css": "h1"}]}}}]
+    }
+  },
+  "options": {}
 }
 ```
-
-Selector alternatives: `{"selectors": [{"css": "…"}, {"xpath": "…"}]}`.
 
 ## 9. CLI
 

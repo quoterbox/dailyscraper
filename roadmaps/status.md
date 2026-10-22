@@ -2,57 +2,64 @@
 
 Обновлено: 2026-10-22. Ветка: `dev`.
 
-## Текущий этап: 0 — каркас
+## Этап 0 — каркас
 
-Готово.
+Готово и закоммичено.
+
+## Текущий этап: 1 — домен и схема
+
+Готово, ожидает коммита владельцем.
 
 ### Сделано
 
-- `roadmaps/`: [план](plan.md), [заметки](notes.md), ADR
-  [0001](decisions/0001-clean-repository-and-naming.md)–[0006](decisions/0006-roadmaps-as-project-memory.md).
-- Инструменты: `pyproject.toml` (uv, hatchling, dependency group `dev`: pytest,
-  ruff, psutil), `uv.lock`, `.python-version` = 3.13, `Makefile`, `.gitignore`,
-  `.editorconfig`. ruff обрабатывает только `*.py`/`*.pyi`.
-- Пакет `dailyscraper/`: 20 пакетов-слоёв, пока пустых; тест правила
-  зависимостей `tests/unit/test_layers.py`.
-- `dailyscraper/settings/environment.py`: выбор окружения (`DAILYSCRAPER_ENV`)
-  и правила изоляции testing-окружения.
-- `dailyscraper/testing/fault_injection/`: детерминированное внедрение сбоев с
-  точками под слоты: `navigation.before_open` / `after_open`,
-  `slot.after_session_open` (контекст `task_kind`), `slot.after_task_started`.
-- `tests/bootstrap.py`, `tests/conftest.py`: изоляция тестовой сессии в
-  `.test-artifacts/<session>/`, рабочие папки сценариев с сохранением при
-  падении.
-- `tests/harness/`: управление процессами, локальный CONNECT-прокси, рабочие
-  папки сценариев.
-- `tests/fixtures/`: контракт controlled site.
-- `tools/test_suite.py`: профили `fast`, `network`, `browser`, `full`.
+- `domain/`: `ErrorCategory`, `PageType`, `PageState`, `PageOutcome`.
+- `pages/`: селекторы с упорядоченными альтернативами и `prepare`; один
+  алгоритм вывода XPath элементов по двум образцам (по шагам пути, без
+  ограничения на число цифр индекса, с поддержкой `/` в предикатах); модели
+  `ListPage`, `DetailPage`, `AuthPage`, `PageStateRules`; компиляция templates в
+  неизменяемые `Compiled*Template`.
+- `schema/`: `ScraperDefinition` (`scraper.json` v3), загрузка пакета с
+  подстановкой `${env:…}`, проверкой имени и компиляцией шаблонов.
+- `settings/`: загрузка `config/<env>/*.json`, `*.local.json`, оверлей тестовой
+  конфигурации, переопределения `DAILYSCRAPER__…`, `.env`; неизменяемый
+  `Settings`; в testing данные и логи только внутри рабочей папки.
+  Конфиги `config/development`, `config/testing`: секции `paths`, `scrapers`.
+- `tools/convert_scraper.py`: перевод предыдущего формата в v3 с
+  предупреждениями о непереносимом и проверкой результата.
+- Контролируемые пакеты `tests/scrapers/controlled_catalog`,
+  `tests/scrapers/controlled_details` в формате v3, полученные конвертером из
+  `tests/fixtures/previous_format/`.
+- ADR [0008](decisions/0008-scraper-json-v3.md),
+  [0009](decisions/0009-scraper-actions-hooks.md),
+  [0010](decisions/0010-settings-loading.md).
+- Зависимости: `pydantic`, `python-dotenv`.
 
 ### Проверено
 
 | Команда | Результат |
 |---|---|
-| `uv run pytest` (профиль по умолчанию) | 45 passed, 1 deselected |
-| `uv run python tools/test_suite.py network` | 1 passed: controlled site отдаёт 9/9/1 товаров, 19 уникальных |
+| `uv run pytest` | 116 passed, 1 deselected |
+| `uv run python tools/test_suite.py network` | 1 passed |
 | `uv run ruff check .`, `uv run ruff format --check .` | чисто |
+| Конвертер на всех пакетах предыдущего формата | используемые пакеты конвертируются и проходят валидацию; пакеты с авторизацией и формата прототипа требуют ручной правки |
 
 ### Отклонения от плана этапа
 
-- Конфиги `config/<env>/` и их загрузка перенесены на этап 1: формат загрузчика
-  зависит от схемы v3.
-- Части harness, запускающие CLI и читающие SQLite, переносятся на этапах 3–4
-  вместе с runtime.
-- Тесты fault injection для браузерных точек вернутся на этапе 2 вместе с
-  `transport/`.
+- `Task`, `Attempt`, `ProxyId` не добавлены: появятся на этапах 3–5 вместе с
+  потребителями.
+- Схемы runtime и workload не добавлены: появятся на этапах 3–4.
+- Класс `ScraperActions` не реализован: контракт зафиксирован в ADR 0009,
+  реализация — на этапе 2 вместе с обёрткой страницы.
 
-## Следующий шаг: этап 1 — домен и схема
+## Следующий шаг: этап 2 — страницы в одном процессе
 
-1. `domain/`: `TaskKind`, `Task`, `Attempt`, `ErrorCategory`, `PageState`,
-   `PageOutcome`, `TaskOutcome`, `ProxyId`, `Selector` с альтернативами.
-2. Модели страниц (`pages/`) с неизменяемым конфигом и `CompiledTemplate`;
-   вычисление общего XPath с тестами.
-3. `schema/`: `scraper.json` v3, runtime, workload; `settings/`: загрузка
-   `config/<env>/*.json` и неизменяемый снимок.
-4. ADR про hooks `ScraperActions` и формат selector alternatives.
-5. `tools/convert_scraper.py` и контролируемые пакеты `tests/scrapers/` в
-   формате v3.
+1. `transport/`: Playwright-адаптер, нейтральная обёртка страницы,
+   `ElementFinder` на селекторах v3.
+2. `detection/`: page state и единый классификатор ошибок.
+3. `execution/`: `Navigator` (warmup, bootstrap, ожидание состояния),
+   `ItemSink` в файл.
+4. `page_scrapers/`: List / Detail / Auth на скомпилированных шаблонах;
+   `pipelines/DefaultPipeline`; `actions/ScraperActions`.
+5. Временный CLI: один парсер, один браузер, без прокси. Критерий: controlled
+   site — каталог 9/9/1 (19 товаров), detail совпадает с
+   `tests/fixtures/expected/controlled_details_v1.json`.
