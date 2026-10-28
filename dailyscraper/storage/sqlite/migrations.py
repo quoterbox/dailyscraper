@@ -166,9 +166,27 @@ CREATE TABLE leases (
 CREATE INDEX leases_by_key ON leases(lease_key, expires_at);
 """
 
+PROXY_HEALTH = """
+CREATE TABLE proxy_health (
+    site TEXT NOT NULL,
+    proxy_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    generation INTEGER NOT NULL,
+    consecutive_failures INTEGER NOT NULL,
+    failures INTEGER NOT NULL,
+    successes INTEGER NOT NULL,
+    open_count INTEGER NOT NULL,
+    cooldown_until TEXT,
+    last_category TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (site, proxy_id)
+);
+"""
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", BASELINE),
     Migration(2, "tasks_attempts_commands_leases", TASKS),
+    Migration(3, "proxy_health", PROXY_HEALTH),
 )
 
 

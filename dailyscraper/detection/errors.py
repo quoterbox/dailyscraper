@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import urllib.error
+
 from dailyscraper.detection.markers import (
     BROWSER_ERROR_TEXT_MARKERS,
     CAPTCHA_TEXT_MARKERS,
@@ -37,8 +39,23 @@ def state_for_navigation_error(error: str | None) -> PageState:
     return PageState.LOAD_FAILED
 
 
+HTTP_CATEGORIES = {
+    407: ErrorCategory.PROXY_AUTH,
+    401: ErrorCategory.BLOCKED,
+    403: ErrorCategory.BLOCKED,
+    429: ErrorCategory.RATE_LIMITED,
+}
+
+
 def classify_error(error: BaseException | str) -> ErrorCategory:
     if isinstance(error, ConnectionError):
+        return ErrorCategory.NETWORK
+    # urllib errors are OSErrors carrying the URL as a filename; they are not file problems.
+    if isinstance(error, urllib.error.HTTPError):
+        return HTTP_CATEGORIES.get(error.code, ErrorCategory.LOAD_FAILED)
+    if isinstance(error, urllib.error.URLError):
+        if isinstance(error.reason, OSError):
+            return classify_error(error.reason)
         return ErrorCategory.NETWORK
     if isinstance(error, OSError) and error.filename is not None:
         return ErrorCategory.FILESYSTEM

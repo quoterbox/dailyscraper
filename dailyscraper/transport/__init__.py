@@ -1,6 +1,6 @@
 """Playwright adapter, element finder and manual interventions."""
 
-from dailyscraper.transport.browser import PlaywrightBrowser
+from dailyscraper.transport.browser import PlaywrightBrowser, SessionPlan
 from dailyscraper.transport.elements import Element, ElementFinder
 from dailyscraper.transport.errors import (
     BrowserClosedError,
@@ -18,6 +18,7 @@ __all__ = [
     "LivePageProbe",
     "Navigation",
     "PlaywrightBrowser",
+    "SessionPlan",
     "is_browser_closed_error",
     "is_timeout_error",
 ]

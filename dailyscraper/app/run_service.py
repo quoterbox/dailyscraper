@@ -18,12 +18,14 @@ import psutil
 from dailyscraper.browsers import DEFAULT_OPENER, BrowserManager, SlotConfig
 from dailyscraper.dispatch import Dispatcher, DispatchResult
 from dailyscraper.domain import (
+    DIRECT_PROXY,
     Attempt,
     Command,
     CommandKind,
     DeliveryRecord,
     Dimension,
     EventLevel,
+    Proxy,
     RunRecord,
     RunStatus,
     TaskKind,
@@ -38,6 +40,13 @@ from dailyscraper.output import (
     scraper_records,
     scraper_rows,
     write_output,
+)
+from dailyscraper.proxies import (
+    ProxyAllocator,
+    ProxyHealth,
+    ProxyPool,
+    build_pool,
+    check_proxies,
 )
 from dailyscraper.schema import Inputs, ScraperPackage, load_scraper_package
 from dailyscraper.settings import Settings, load_variables
@@ -201,8 +210,21 @@ class RunService:
         self.store.tasks.enqueue(specs)
         events.emit("run.planned", tasks=len(specs))
 
-        def slot_config(scraper: str, slot_id: str) -> SlotConfig:
-            return self._slot_config(run_id, layout, packages[scraper], slot_id, execution)
+        sites = {name: site_key(package) for name, package in packages.items()}
+        pool = build_pool(self.settings.proxies)
+        health = ProxyHealth(self.store, self.settings.proxy_health)
+        allocator = ProxyAllocator(pool, health)
+        self._check_proxies(pool, packages, sites, health, events)
+
+        def slot_config(scraper: str, slot_id: str, proxy: Proxy | None) -> SlotConfig:
+            return self._slot_config(
+                run_id, layout, packages[scraper], slot_id, execution, sites[scraper], proxy
+            )
+
+        def proxies(scraper: str, avoid) -> list[Proxy | None]:
+            return allocator.candidates(
+                sites[scraper], self.settings.selected_proxies(scraper), avoid
+            )
 
         dispatcher = Dispatcher(
             store=self.store,
@@ -214,15 +236,18 @@ class RunService:
                 configs=slot_config,
                 rules=self.settings.limit_rules(),
                 sessions=lambda scraper: {
-                    Dimension.SITE: site_key(packages[scraper]),
+                    Dimension.SITE: sites[scraper],
                     Dimension.PROJECT: self.settings.project_id,
                 },
+                proxies=proxies,
             ),
             events=events,
             run_id=run_id,
             host_id=self.host_id,
             scrapers=list(packages),
             retry=RetryPolicy(runtime.retry_delay_seconds, runtime.retry_max_delay_seconds),
+            health=health,
+            sites=sites,
             poll_interval=runtime.poll_interval_seconds,
             stop_grace=runtime.stop_grace_seconds,
         )
@@ -239,6 +264,8 @@ class RunService:
         package: ScraperPackage,
         slot_id: str,
         execution: _Execution,
+        site: str,
+        proxy: Proxy | None,
     ) -> SlotConfig:
         definition = package.definition
         inputs = definition.inputs or Inputs()
@@ -262,7 +289,52 @@ class RunService:
             link_field=link_field,
             input_snapshot=snapshot.path if snapshot else None,
             opener=self.opener,
+            proxy=proxy,
+            **self._session_dirs(site, proxy),
         )
+
+    def _session_dirs(self, site: str, proxy: Proxy | None) -> dict[str, Path | None]:
+        if self.settings.browser.isolation != "persistent":
+            return {"profile_dir": None, "extension_dir": None}
+        proxy_id = proxy.proxy_id if proxy is not None else DIRECT_PROXY
+        return {
+            "profile_dir": self.settings.profiles_dir / site / proxy_id,
+            "extension_dir": self.settings.extensions_dir / site / proxy_id if proxy else None,
+        }
+
+    def _check_proxies(
+        self,
+        pool: ProxyPool,
+        packages: Mapping[str, ScraperPackage],
+        sites: Mapping[str, str],
+        health: ProxyHealth,
+        events: RunEvents,
+    ) -> None:
+        """Open the circuit of proxies that fail a plain HTTP request, for every site of the run."""
+        if pool.empty or not self.settings.proxy_check.enabled:
+            return
+        used = {
+            proxy.proxy_id: proxy
+            for name in packages
+            for proxy in pool.select(self.settings.selected_proxies(name))
+        }
+        results = check_proxies(list(used.values()), self.settings.proxy_check)
+        for result in results:
+            events.emit(
+                "proxy.checked",
+                level=EventLevel.INFO if result.ok else EventLevel.WARNING,
+                proxy=result.proxy_id,
+                ok=result.ok,
+                exit_ip=result.exit_ip,
+                category=result.category,
+                error=result.error,
+                seconds=round(result.seconds, 2),
+            )
+            if not result.ok:
+                for site in set(sites.values()):
+                    health.open_now(site, used[result.proxy_id], result.category or "network")
+        failed = sum(1 for result in results if not result.ok)
+        logger.info("Network check: %s of %s proxies failed", failed, len(results))
 
     def _outcome(
         self, run_id: str, packages: Mapping[str, ScraperPackage], execution: _Execution
@@ -400,6 +472,13 @@ class RunService:
                 "statuses": self._statuses(run_id, layout, name, snapshot),
                 "tasks": dict(Counter(task.status.value for task in own)),
                 "attempts": sum(task.attempts for task in own),
+                "proxies": dict(
+                    Counter(
+                        attempt.proxy_id or DIRECT_PROXY
+                        for attempt in attempts
+                        if attempt.task_id in {task.task_id for task in own}
+                    )
+                ),
                 "input": None
                 if snapshot is None
                 else {

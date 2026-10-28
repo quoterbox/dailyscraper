@@ -2,96 +2,24 @@
 
 from __future__ import annotations
 
-import json
 import threading
 import time
-from pathlib import Path
 
 import pytest
 
 from dailyscraper.app import cli
 from dailyscraper.app.run_service import RunRequest, RunService
 from dailyscraper.domain import DeliveryStatus, RunRecord, RunStatus, TaskStatus
-from dailyscraper.output import iter_csv
-from dailyscraper.settings import load_settings
 from dailyscraper.settings.models import (
     DeliverySettings,
     LimitSettings,
     OutputSettings,
-    RuntimeSettings,
     ScraperSelection,
-    StorageSettings,
 )
-from dailyscraper.storage import open_store
 from tests.fakes import OPENER
+from tests.integration.runs import make_input, make_package, output_rows, run
 
 pytestmark = pytest.mark.serial
-
-
-@pytest.fixture
-def settings(project_root: Path, scenario_workspace: Path):
-    loaded = load_settings(project_root)
-    return loaded.model_copy(
-        update={
-            "paths": loaded.paths.model_copy(
-                update={
-                    "data": scenario_workspace / "data",
-                    "scrapers": scenario_workspace / "scrapers",
-                }
-            ),
-            "storage": StorageSettings(batch_rows=2, fsync=False),
-            "output": OutputSettings(formats=("csv",)),
-            "runtime": RuntimeSettings(
-                max_slots=4,
-                max_browsers_per_site_proxy=10,
-                memory_reserve_mb=0,
-                slot_memory_mb=1,
-                items_per_task=2,
-                retry_delay_seconds=0,
-                poll_interval_seconds=0.1,
-                stop_grace_seconds=5,
-            ),
-        }
-    )
-
-
-@pytest.fixture
-def store(settings):
-    opened = open_store("sqlite", settings.database_path)
-    yield opened
-    opened.close()
-
-
-def make_package(settings, project_root: Path, name: str, kind: str, fake: dict) -> str:
-    source = "controlled_catalog" if kind == "list" else "controlled_details"
-    definition = json.loads(
-        (project_root / "tests" / "scrapers" / source / "scraper.json").read_text("utf-8")
-    )
-    definition["name"] = name
-    definition["options"] = {"fake": fake}
-    if kind == "list":
-        definition["links"] = [
-            {"id": "main", "type": "list", "urls": ["https://a.test/c1", "https://a.test/c2"]}
-        ]
-    target = settings.paths.scrapers / name
-    target.mkdir(parents=True)
-    (target / "scraper.json").write_text(json.dumps(definition), encoding="utf-8")
-    return name
-
-
-def make_input(path: Path, rows: int) -> Path:
-    lines = ["source_id;detail_link"] + [f"s{n};https://a.test/p{n}" for n in range(1, rows + 1)]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
-
-
-def run(settings, store, *scrapers: str, input_path: Path | None = None):
-    return RunService(settings, store, opener=OPENER).run(RunRequest(scrapers, input_path))
-
-
-def output_rows(report, name: str) -> list[dict[str, str]]:
-    (path,) = [path for path in report.outputs["csv"] if path.stem == name]
-    return list(iter_csv(path))
 
 
 def test_list_tasks_run_in_slots_and_are_exported(settings, store, project_root) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from multiprocessing.connection import Connection, wait
@@ -32,6 +32,7 @@ from dailyscraper.domain import (
     ErrorCategory,
     LeaseKey,
     LimitRule,
+    Proxy,
     Task,
     lease_keys,
 )
@@ -64,6 +65,12 @@ class SlotHandle:
     task_started_at: float = 0.0
     last_message_at: float = 0.0
     failure: str | None = None
+    proxy: Proxy | None = None
+    tasks_done: int = 0
+
+    @property
+    def proxy_id(self) -> str:
+        return self.proxy.proxy_id if self.proxy is not None else DIRECT_PROXY
 
 
 @dataclass(frozen=True)
@@ -100,9 +107,10 @@ class BrowserManager:
     run_id: str
     host_id: str
     runtime: RuntimeSettings
-    configs: Callable[[str, str], SlotConfig]
+    configs: Callable[[str, str, Proxy | None], SlotConfig]
     rules: Sequence[LimitRule] = ()
     sessions: Callable[[str], Mapping[Dimension, str]] = lambda scraper: {}
+    proxies: Callable[[str, Collection[str]], list[Proxy | None]] = lambda scraper, avoid: [None]
     clock: Callable[[], float] = time.monotonic
     available_memory_mb: Callable[[], float] = lambda: psutil.virtual_memory().available / MB
     terminate: Callable[[int], object] = terminate_tree
@@ -113,22 +121,32 @@ class BrowserManager:
     def slots_of(self, scraper: str) -> list[SlotHandle]:
         return [slot for slot in self.slots.values() if slot.scraper == scraper]
 
-    def idle_slot(self, scraper: str) -> SlotHandle | None:
-        return next((slot for slot in self.slots_of(scraper) if slot.state is SlotState.IDLE), None)
+    def idle_slot(self, scraper: str, avoid: Collection[str] = ()) -> SlotHandle | None:
+        return next(
+            (
+                slot
+                for slot in self.slots_of(scraper)
+                if slot.state is SlotState.IDLE and slot.proxy_id not in avoid
+            ),
+            None,
+        )
 
-    def lease_keys(self, scraper: str) -> list[LeaseKey]:
+    def lease_keys(self, scraper: str, proxy: Proxy | None = None) -> list[LeaseKey]:
         session = {
             Dimension.HOST: self.host_id,
             Dimension.RUN: self.run_id,
             Dimension.KIND: BROWSER_KIND,
-            Dimension.PROXY: DIRECT_PROXY,
+            Dimension.PROXY: proxy.proxy_id if proxy is not None else DIRECT_PROXY,
             Dimension.SCRAPER: scraper,
             **self.sessions(scraper),
         }
         return lease_keys(self.rules, session)
 
     def can_start(self, scraper: str) -> bool:
-        if self.store.leases.blocked(self.lease_keys(scraper)):
+        if not any(
+            not self.store.leases.blocked(self.lease_keys(scraper, proxy))
+            for proxy in self.proxies(scraper, ())
+        ):
             return False
         if not self.slots:
             return True
@@ -138,23 +156,18 @@ class BrowserManager:
             return False
         return True
 
-    def start(self, scraper: str) -> SlotHandle | None:
+    def start(self, scraper: str, avoid: Collection[str] = ()) -> SlotHandle | None:
+        """A new slot on the best proxy that fits every limit; ``None`` if none does."""
         number = self._numbers.get(scraper, 0) + 1
-        self._numbers[scraper] = number
         slot_id = f"{scraper}-{number}"
         holder = f"{self.run_id}/{slot_id}"
-        full = self.store.leases.acquire(
-            holder,
-            self.lease_keys(scraper),
-            run_id=self.run_id,
-            ttl_seconds=self.runtime.lease_ttl_seconds,
-        )
-        if full:
-            logger.info("Not starting a slot for %s, limits reached: %s", scraper, ", ".join(full))
+        proxy = self._lease_proxy(scraper, holder, avoid)
+        if proxy is False:
             return None
+        self._numbers[scraper] = number
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe()
-        config = self.configs(scraper, slot_id)
+        config = self.configs(scraper, slot_id, proxy)
         process = context.Process(
             target=slot_main,
             args=(config.model_dump_json(), child),
@@ -176,10 +189,27 @@ class BrowserManager:
             lease_holder=holder,
             started_at=now,
             last_message_at=now,
+            proxy=proxy,
         )
         self.slots[slot_id] = slot
-        logger.info("Slot %s started (pid %s)", slot_id, process.pid)
+        logger.info("Slot %s started (pid %s) via %s", slot_id, process.pid, slot.proxy_id)
         return slot
+
+    def _lease_proxy(
+        self, scraper: str, holder: str, avoid: Collection[str]
+    ) -> Proxy | None | bool:
+        full: list[str] = []
+        for proxy in self.proxies(scraper, avoid):
+            full = self.store.leases.acquire(
+                holder,
+                self.lease_keys(scraper, proxy),
+                run_id=self.run_id,
+                ttl_seconds=self.runtime.lease_ttl_seconds,
+            )
+            if not full:
+                return proxy
+        logger.info("Not starting a slot for %s, limits reached: %s", scraper, ", ".join(full))
+        return False
 
     def submit(self, slot: SlotHandle, task: Task, attempt: Attempt) -> None:
         self.send(
@@ -264,12 +294,22 @@ class BrowserManager:
             slot.state = SlotState.IDLE
         elif isinstance(message, TaskFinished) and message.attempt_id == slot.attempt_id:
             slot.attempt_id = None
+            slot.tasks_done += 1
             if slot.state is SlotState.BUSY:
                 slot.state = SlotState.IDLE
+            if self._worn_out(slot):
+                self.retire(slot.slot_id)
         elif isinstance(message, SlotFailed):
             slot.failure = message.error
         elif isinstance(message, SessionBroken):
             slot.failure = message.reason
+
+    def _worn_out(self, slot: SlotHandle) -> bool:
+        runtime = self.runtime
+        if runtime.slot_max_tasks and slot.tasks_done >= runtime.slot_max_tasks:
+            return True
+        age = self.clock() - slot.started_at
+        return bool(runtime.slot_max_age_seconds and age >= runtime.slot_max_age_seconds)
 
     def _exit_reason(self, slot: SlotHandle) -> str:
         code = slot.process.exitcode

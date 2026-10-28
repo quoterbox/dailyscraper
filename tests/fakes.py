@@ -8,7 +8,7 @@ Slots import it by path (``tests.fakes:open_fake``). Its behaviour comes from
 Keys: ``rows``, ``category`` (link failure), ``raise``, ``crash_after`` (exit
 the process after so many committed rows), ``hang`` (stop reporting),
 ``row_delay`` (cancellable pause per row), ``statuses`` (detail status per
-input position).
+input position). ``proxies`` overrides the behaviour for a proxy id.
 """
 
 from __future__ import annotations
@@ -28,27 +28,40 @@ OPENER = "tests.fakes:open_fake"
 
 
 @contextmanager
-def open_fake(package, settings, sink, pacer=None, snapshots=None) -> Iterator[FakePipeline]:
-    yield FakePipeline(package.definition.options.get("fake", {}), sink, pacer or Pacer())
+def open_fake(
+    package, settings, sink, pacer=None, snapshots=None, plan=None
+) -> Iterator[FakePipeline]:
+    yield FakePipeline(package.definition.options.get("fake", {}), sink, pacer or Pacer(), plan)
 
 
 class FakePipeline:
-    def __init__(self, options: dict[str, Any], sink, pacer: Pacer) -> None:
+    def __init__(self, options: dict[str, Any], sink, pacer: Pacer, plan=None) -> None:
         self.options = options
         self.sink = sink
         self.pacer = pacer
+        self.proxy_id = plan.proxy.proxy_id if plan and plan.proxy else "direct"
 
     def behaviour(self) -> dict[str, Any]:
         attempt = (self.sink.attempt_id or "#1").rpartition("#")[2]
-        base = {key: value for key, value in self.options.items() if key != "attempts"}
-        return {**base, **self.options.get("attempts", {}).get(attempt, {})}
+        base = {
+            key: value for key, value in self.options.items() if key not in {"attempts", "proxies"}
+        }
+        return {
+            **base,
+            **self.options.get("attempts", {}).get(attempt, {}),
+            **self.options.get("proxies", {}).get(self.proxy_id, {}),
+        }
 
     def run_links(self, links: list[str]) -> PipelineResult:
         behaviour = self.behaviour()
         (link,) = links
         items = []
         for number in range(behaviour.get("rows", 3)):
-            item = {"item_name": f"{link}#{number}", "detail_link": f"{link}/p{number}"}
+            item = {
+                "item_name": f"{link}#{number}",
+                "detail_link": f"{link}/p{number}",
+                "proxy": self.proxy_id,
+            }
             items.append(item)
             self._row(behaviour, item)
         self._end(behaviour)

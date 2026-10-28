@@ -13,7 +13,7 @@ from dailyscraper.execution.timing import Pacer
 from dailyscraper.pipelines import DefaultPipeline
 from dailyscraper.schema import ScraperPackage
 from dailyscraper.settings import Settings
-from dailyscraper.transport import PlaywrightBrowser
+from dailyscraper.transport import PlaywrightBrowser, SessionPlan
 
 
 @contextmanager
@@ -23,13 +23,14 @@ def open_pipeline(
     sink: ItemSink,
     pacer: Pacer | None = None,
     snapshots: SnapshotWriter | None = None,
+    plan: SessionPlan | None = None,
 ) -> Iterator[DefaultPipeline]:
     """One browser session running one scraper package in the current process."""
 
     pacer = pacer or Pacer()
     actions_class = load_package_class(package, "actions", "Actions", ScraperActions)
     pipeline_class = load_package_class(package, "pipeline", "Pipeline", DefaultPipeline)
-    with PlaywrightBrowser(settings.browser) as browser:
+    with PlaywrightBrowser(settings.browser, plan) as browser:
         actions = actions_class(
             browser.page, browser.finder, package.definition.options, pacer.check_interrupted
         )

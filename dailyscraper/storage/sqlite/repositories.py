@@ -19,10 +19,12 @@ from dailyscraper.domain import (
     ErrorCategory,
     Event,
     EventLevel,
+    HealthStatus,
     LeaseKey,
     PartitionRef,
     PartitionSeal,
     PartitionState,
+    ProxyHealthState,
     RunRecord,
     RunStatus,
     Task,
@@ -800,4 +802,80 @@ def _run(row: sqlite3.Row) -> RunRecord:
         error=row["error"],
         host_id=row["host_id"],
         pid=row["pid"],
+    )
+
+
+class SQLiteProxyHealth:
+    def __init__(self, db: Database, clock: Clock) -> None:
+        self._db = db
+        self._clock = clock
+
+    def states(self, site: str, proxy_ids: Sequence[str]) -> dict[str, ProxyHealthState]:
+        if not proxy_ids:
+            return {}
+        ids = list(dict.fromkeys(proxy_ids))
+        rows = self._db.read(
+            lambda c: c.execute(
+                "SELECT * FROM proxy_health WHERE site = ?"
+                f" AND proxy_id IN ({', '.join('?' for _ in ids)})",
+                (site, *ids),
+            ).fetchall()
+        )
+        found = {row["proxy_id"]: _health(row) for row in rows}
+        return {proxy_id: found.get(proxy_id, ProxyHealthState(site, proxy_id)) for proxy_id in ids}
+
+    def update(
+        self,
+        site: str,
+        proxy_id: str,
+        change: Callable[[ProxyHealthState, str], ProxyHealthState],
+    ) -> tuple[ProxyHealthState, ProxyHealthState]:
+        def operation(c: sqlite3.Connection) -> tuple[ProxyHealthState, ProxyHealthState]:
+            row = c.execute(
+                "SELECT * FROM proxy_health WHERE site = ? AND proxy_id = ?", (site, proxy_id)
+            ).fetchone()
+            before = _health(row) if row is not None else ProxyHealthState(site, proxy_id)
+            after = change(before, self._clock())
+            c.execute(
+                "INSERT INTO proxy_health (site, proxy_id, status, generation,"
+                " consecutive_failures, failures, successes, open_count, cooldown_until,"
+                " last_category, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                " ON CONFLICT (site, proxy_id) DO UPDATE SET status = excluded.status,"
+                " generation = excluded.generation,"
+                " consecutive_failures = excluded.consecutive_failures,"
+                " failures = excluded.failures, successes = excluded.successes,"
+                " open_count = excluded.open_count, cooldown_until = excluded.cooldown_until,"
+                " last_category = excluded.last_category, updated_at = excluded.updated_at",
+                (
+                    site,
+                    proxy_id,
+                    after.status.value,
+                    after.generation,
+                    after.consecutive_failures,
+                    after.failures,
+                    after.successes,
+                    after.open_count,
+                    after.cooldown_until,
+                    after.last_category,
+                    after.updated_at,
+                ),
+            )
+            return before, after
+
+        return self._db.write(operation)
+
+
+def _health(row: sqlite3.Row) -> ProxyHealthState:
+    return ProxyHealthState(
+        site=row["site"],
+        proxy_id=row["proxy_id"],
+        status=HealthStatus(row["status"]),
+        generation=row["generation"],
+        consecutive_failures=row["consecutive_failures"],
+        failures=row["failures"],
+        successes=row["successes"],
+        open_count=row["open_count"],
+        cooldown_until=row["cooldown_until"],
+        last_category=row["last_category"],
+        updated_at=row["updated_at"],
     )

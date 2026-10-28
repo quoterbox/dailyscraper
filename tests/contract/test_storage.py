@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from dailyscraper.domain import (
     LeaseKey,
     PartitionRef,
     PartitionSeal,
+    ProxyHealthState,
     RunRecord,
     RunStatus,
     TaskKind,
@@ -429,3 +431,19 @@ def test_renewed_leases_stay(store: Store) -> None:
     store.leases.renew(["s1"], ttl_seconds=60)
 
     assert acquire(store, "s2", SITE_PROXY) == [SITE_PROXY.key]
+
+
+def test_proxy_health_starts_fresh_and_updates_atomically(store: Store) -> None:
+    fresh = store.proxy_health.states("a.ru", ["p1", "p2"])
+    assert fresh["p1"] == ProxyHealthState("a.ru", "p1")
+
+    def fail(state: ProxyHealthState, now: str) -> ProxyHealthState:
+        return replace(state, failures=state.failures + 1, updated_at=now)
+
+    before, after = store.proxy_health.update("a.ru", "p1", fail)
+    _, again = store.proxy_health.update("a.ru", "p1", fail)
+
+    assert (before.failures, after.failures, again.failures) == (0, 1, 2)
+    assert after.updated_at is not None
+    assert store.proxy_health.states("a.ru", ["p1"])["p1"].failures == 2
+    assert store.proxy_health.states("b.ru", ["p1"])["p1"].failures == 0

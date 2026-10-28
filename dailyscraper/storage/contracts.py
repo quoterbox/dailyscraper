@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import Any, Protocol
 
 from dailyscraper.domain import (
@@ -15,6 +15,7 @@ from dailyscraper.domain import (
     PartitionRef,
     PartitionSeal,
     PartitionState,
+    ProxyHealthState,
     RunRecord,
     RunStatus,
     Task,
@@ -162,8 +163,24 @@ class DeliveryLog(Protocol):
     def list(self, run_id: str) -> list[DeliveryRecord]: ...
 
 
+class ProxyHealthRepository(Protocol):
+    """Health of a proxy for a site, shared by all runs; unknown pairs start fresh."""
+
+    def states(self, site: str, proxy_ids: Sequence[str]) -> dict[str, ProxyHealthState]: ...
+
+    def update(
+        self,
+        site: str,
+        proxy_id: str,
+        change: Callable[[ProxyHealthState, str], ProxyHealthState],
+    ) -> tuple[ProxyHealthState, ProxyHealthState]:
+        """Apply ``change(state, now)`` atomically; returns the state before and after."""
+        ...
+
+
 class Store(Protocol):
     runs: RunRepository
+    proxy_health: ProxyHealthRepository
     partitions: PartitionRegistry
     tasks: TaskRepository
     commands: CommandLog

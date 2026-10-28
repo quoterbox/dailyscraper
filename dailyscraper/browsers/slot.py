@@ -26,7 +26,7 @@ from dailyscraper.browsers.messages import (
     TaskStarted,
 )
 from dailyscraper.detection import classify_error
-from dailyscraper.domain import AttemptStatus, ErrorCategory, TaskKind, TaskOutcome
+from dailyscraper.domain import AttemptStatus, ErrorCategory, Proxy, TaskKind, TaskOutcome
 from dailyscraper.execution.partitions import ItemIdentity, PartitionSink, PartitionWriter
 from dailyscraper.execution.snapshots import SnapshotWriter
 from dailyscraper.execution.timing import Pacer
@@ -35,7 +35,7 @@ from dailyscraper.schema import ScraperDefinition, ScraperPackage
 from dailyscraper.settings import Settings
 from dailyscraper.tasks.inputs import SNAPSHOT_DELIMITER, SNAPSHOT_ENCODING
 from dailyscraper.tasks.retry import RETRYABLE
-from dailyscraper.transport import BrowserClosedError, is_browser_closed_error
+from dailyscraper.transport import BrowserClosedError, SessionPlan, is_browser_closed_error
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,9 @@ class SlotConfig(BaseModel):
     link_field: str | None = None
     input_snapshot: Path | None = None
     opener: str = DEFAULT_OPENER
+    proxy: Proxy | None = None
+    profile_dir: Path | None = None
+    extension_dir: Path | None = None
 
 
 def slot_main(config_json: str, connection: Connection) -> None:
@@ -102,8 +105,16 @@ def slot_main(config_json: str, connection: Connection) -> None:
     )
     opener = _import(config.opener)
     try:
+        plan = SessionPlan(
+            proxy=config.proxy, profile_dir=config.profile_dir, extension_dir=config.extension_dir
+        )
         with opener(
-            package, settings, sink, pacer=Pacer(channel.check_interrupted), snapshots=snapshots
+            package,
+            settings,
+            sink,
+            pacer=Pacer(channel.check_interrupted),
+            snapshots=snapshots,
+            plan=plan,
         ) as pipeline:
             channel.send(SlotReady(pid=os.getpid()))
             _serve(channel, pipeline, sink, config)

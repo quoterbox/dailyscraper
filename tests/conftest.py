@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import http.server
+import json
 import os
+import threading
 from pathlib import Path
 
 import pytest
@@ -80,3 +83,25 @@ def pytest_terminal_summary(terminalreporter) -> None:
     terminalreporter.section("retained test artifacts")
     for entry in _RETAINED_WORKSPACES:
         terminalreporter.write_line(f"{entry.nodeid}: {entry.root} ({entry.reason})")
+
+
+@pytest.fixture
+def ip_server():
+    """A local HTTP endpoint answering like an IP echo service."""
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"ip": "203.0.113.7"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}/ip"
+    server.shutdown()

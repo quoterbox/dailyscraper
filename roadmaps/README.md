@@ -54,3 +54,4 @@
 | [0014](decisions/0014-captcha-solvers-and-ai-observer.md) | Решение капч через API и ИИ-наблюдатель | принято |
 | [0015](decisions/0015-open-core-resources-and-runs.md) | Открытое ядро, ресурсный профиль, запуски и доставка | принято |
 | [0016](decisions/0016-session-limits.md) | Общий механизм лимитов сессий | принято |
+| [0017](decisions/0017-proxies.md) | Прокси: пул, здоровье, выбор и изоляция сессий | принято |

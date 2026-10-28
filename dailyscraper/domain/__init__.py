@@ -18,6 +18,7 @@ from dailyscraper.domain.events import (
 )
 from dailyscraper.domain.limits import DIRECT_PROXY, Dimension, LeaseKey, LimitRule, lease_keys
 from dailyscraper.domain.pages import PageOutcome, PageState, PageType
+from dailyscraper.domain.proxies import HealthStatus, Proxy, ProxyHealthState
 from dailyscraper.domain.runs import DEFAULT_PROJECT_ID, RunRecord, RunStatus, new_run_id
 from dailyscraper.domain.tasks import (
     Attempt,
@@ -48,6 +49,7 @@ __all__ = [
     "ErrorCategory",
     "Event",
     "EventLevel",
+    "HealthStatus",
     "LeaseKey",
     "LimitRule",
     "PageOutcome",
@@ -56,6 +58,8 @@ __all__ = [
     "PartitionRef",
     "PartitionSeal",
     "PartitionState",
+    "Proxy",
+    "ProxyHealthState",
     "RunRecord",
     "RunStatus",
     "Task",

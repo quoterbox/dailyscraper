@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -20,11 +20,13 @@ from dailyscraper.domain import (
     CommandKind,
     ErrorCategory,
     EventLevel,
+    Proxy,
     TaskKind,
     TaskOutcome,
     TaskStatus,
 )
 from dailyscraper.observability import RunEvents
+from dailyscraper.proxies import ProxyHealth
 from dailyscraper.storage import Store
 from dailyscraper.tasks.retry import RetryPolicy, Verdict
 
@@ -37,6 +39,17 @@ class DispatchResult:
     killed: bool = False
     interrupted: bool = False
     reasons: list[str] = field(default_factory=list)
+
+
+def proxy_signal(outcome: TaskOutcome) -> str | None:
+    """The failure that speaks about the proxy, or ``None`` when the session went fine."""
+    if outcome.status is AttemptStatus.FAILED and outcome.category is not None:
+        return outcome.category.value
+    for failure in outcome.failures:
+        category = failure.get("category")
+        if category and category != ErrorCategory.NOT_FOUND:
+            return str(category)
+    return None
 
 
 class Dispatcher:
@@ -52,6 +65,8 @@ class Dispatcher:
         host_id: str,
         scrapers: Sequence[str],
         retry: RetryPolicy,
+        health: ProxyHealth | None = None,
+        sites: Mapping[str, str] | None = None,
         poll_interval: float = 0.5,
         stop_grace: float = 30.0,
         clock: Callable[[], float] = time.monotonic,
@@ -63,12 +78,15 @@ class Dispatcher:
         self.host_id = host_id
         self.scrapers = list(scrapers)
         self.retry = retry
+        self.health = health
+        self.sites = dict(sites or {})
         self.poll_interval = poll_interval
         self.stop_grace = stop_grace
         self._clock = clock
         self.result = DispatchResult()
         self._stop_requested_at: float | None = None
         self._cancel_sent = False
+        self._sessions: dict[str, tuple[str, Proxy | None]] = {}
 
     @property
     def stopping(self) -> bool:
@@ -124,13 +142,16 @@ class Dispatcher:
             task = self.store.tasks.claim(self.run_id, scrapers=allowed) if allowed else None
             if task is None:
                 return
-            slot = self.browsers.idle_slot(task.scraper) or self.browsers.start(task.scraper)
+            slot = self.browsers.idle_slot(task.scraper, task.avoid) or self.browsers.start(
+                task.scraper, task.avoid
+            )
             if slot is None:
                 self.store.tasks.release(task.task_id)
                 return
             attempt = self.store.tasks.start(
-                task.task_id, slot_id=slot.slot_id, host_id=self.host_id
+                task.task_id, slot_id=slot.slot_id, host_id=self.host_id, proxy_id=slot.proxy_id
             )
+            self._sessions[attempt.attempt_id] = (slot.slot_id, slot.proxy)
             self.browsers.submit(slot, task, attempt)
             logger.info("Task %s started in %s", attempt.attempt_id, slot.slot_id)
 
@@ -174,6 +195,7 @@ class Dispatcher:
                 EventLevel.INFO if failure.get("category") == "not_found" else EventLevel.WARNING
             )
             self.events.emit("item.failed", level=level, scraper=task.scraper, **failure)
+        failed_proxy = self._report_proxy(task.scraper, attempt_id, outcome)
         done_rows = None
         if task.kind is TaskKind.DETAIL:
             done_rows = self.store.partitions.item_statuses(
@@ -189,6 +211,7 @@ class Dispatcher:
                 outcome,
                 not_before=due.isoformat(timespec="milliseconds"),
                 payload=decision.payload,
+                avoid=[failed_proxy] if failed_proxy else (),
             )
             verdict = "retry"
         else:
@@ -218,6 +241,34 @@ class Dispatcher:
             rows=outcome.rows,
             error=outcome.error,
         )
+
+    def _report_proxy(self, scraper: str, attempt_id: str, outcome: TaskOutcome) -> str | None:
+        """Tell proxy health how the session did; returns the proxy to avoid on retry."""
+        slot_id, proxy = self._sessions.pop(attempt_id, (None, None))
+        if self.health is None or proxy is None or outcome.status is AttemptStatus.CANCELLED:
+            return None
+        category = proxy_signal(outcome)
+        site = self.sites.get(scraper, scraper)
+        transition = self.health.report(site, proxy, category)
+        if transition.after.status != transition.before.status or transition.opened:
+            self.events.emit(
+                "proxy.health",
+                level=EventLevel.WARNING if transition.opened else EventLevel.INFO,
+                scraper=scraper,
+                site=site,
+                proxy=proxy.proxy_id,
+                status=transition.after.status.value,
+                category=category,
+                generation=transition.after.generation,
+                cooldown_until=transition.after.cooldown_until,
+            )
+        if transition.opened and slot_id is not None:
+            # The session keeps its proxy for life: a burned or rotated proxy needs a new slot.
+            self.browsers.retire(slot_id)
+        policy = self.health.policy
+        if category in policy.immediate_open_categories or category in policy.tracked_categories:
+            return proxy.proxy_id
+        return None
 
     def _apply_commands(self) -> None:
         for command in self.store.commands.pending(self.run_id):

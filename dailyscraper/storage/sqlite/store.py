@@ -11,6 +11,7 @@ from dailyscraper.storage.sqlite.repositories import (
     SQLiteEvents,
     SQLiteLeases,
     SQLitePartitions,
+    SQLiteProxyHealth,
     SQLiteRuns,
     SQLiteTasks,
 )
@@ -36,6 +37,7 @@ class SQLiteStore:
         self.tasks = SQLiteTasks(db, clock)
         self.commands = SQLiteCommands(db, clock)
         self.leases = SQLiteLeases(db, clock)
+        self.proxy_health = SQLiteProxyHealth(db, clock)
         self.events = SQLiteEvents(db)
         self.deliveries = SQLiteDeliveries(db)
 
