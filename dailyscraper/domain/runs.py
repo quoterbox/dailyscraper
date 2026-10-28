@@ -40,6 +40,8 @@ class RunRecord:
     finished_at: str | None = None
     summary: Mapping[str, Any] | None = None
     error: str | None = None
+    host_id: str | None = None
+    pid: int | None = None
 
 
 def new_run_id(now: datetime) -> str:

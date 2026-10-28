@@ -9,6 +9,7 @@ from dailyscraper.app.run_service import RunRequest, RunService
 from dailyscraper.domain import RunStatus
 from dailyscraper.output import iter_csv
 from dailyscraper.settings import load_settings
+from dailyscraper.settings.models import ScraperSelection
 from dailyscraper.storage import open_store
 
 pytestmark = pytest.mark.browser
@@ -33,7 +34,7 @@ def expected(fixtures_root: Path, name: str) -> dict:
 def test_catalog_run_is_stored_and_exported(settings, store, fixtures_root: Path) -> None:
     dataset = expected(fixtures_root, "controlled_dataset_v1.json")
 
-    report = RunService(settings, store).run(RunRequest("controlled_catalog"))
+    report = RunService(settings, store).run(RunRequest(("controlled_catalog",)))
 
     assert report.run.status is RunStatus.COMPLETED
     rows = list(iter_csv(report.outputs["csv"][0]))
@@ -60,7 +61,7 @@ def test_detail_run_keeps_input_order_and_missing_products(
     combined = scenario_workspace / "details.csv"
     combined.write_text("\n".join([*found, *missing.splitlines()[1:]]) + "\n", encoding="utf-8")
 
-    report = RunService(settings, store).run(RunRequest("controlled_details", combined))
+    report = RunService(settings, store).run(RunRequest(("controlled_details",), combined))
 
     assert report.run.status is RunStatus.COMPLETED
     rows = list(iter_csv(report.outputs["csv"][0]))
@@ -69,3 +70,29 @@ def test_detail_run_keeps_input_order_and_missing_products(
     assert rows[1]["detail_link"] == contract["missing_product"]["detail_link"]
     statuses = report.run.summary["scrapers"]["controlled_details"]["statuses"]
     assert statuses == {"ok": 1, "not_found": 1}
+
+
+def test_detail_rows_run_in_parallel_browsers(
+    settings, store, fixtures_root: Path, scenario_workspace: Path
+) -> None:
+    contract = expected(fixtures_root, "controlled_details_v1.json")
+    normal = contract["normal_product"]
+    combined = scenario_workspace / "details.csv"
+    lines = ["source_id;item_name;detail_link"] + [
+        f"copy{n};{normal['item_name']};{normal['detail_link']}" for n in range(1, 5)
+    ]
+    combined.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    parallel = settings.model_copy(
+        update={
+            "scrapers": (ScraperSelection(name="controlled_details", max_parallel=2),),
+            "runtime": settings.runtime.model_copy(update={"items_per_task": 1}),
+        }
+    )
+
+    report = RunService(parallel, store).run(RunRequest(("controlled_details",), combined))
+
+    assert report.run.status is RunStatus.COMPLETED
+    assert report.run.summary["slots"] == 2
+    rows = list(iter_csv(report.outputs["csv"][0]))
+    assert [row["source_id"] for row in rows] == ["copy1", "copy2", "copy3", "copy4"]
+    assert {row["sku"] for row in rows} == {normal["sku"]}

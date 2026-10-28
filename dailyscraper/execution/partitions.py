@@ -95,7 +95,13 @@ class PartitionWriter:
             path=f"partitions/{self.scraper}/{self.writer_id}/part-{self.partition_no:06d}.ndjson",
         )
 
-    def append(self, records: list[dict[str, Any]]) -> BatchCommit | None:
+    def append(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        task_id: str | None = None,
+        attempt_id: str | None = None,
+    ) -> BatchCommit | None:
         if not records:
             return None
         numbered = [{**record, "n": self.next_record + i} for i, record in enumerate(records)]
@@ -116,6 +122,13 @@ class PartitionWriter:
             first_record=self.next_record,
             rows=len(records),
             checksum=checksum,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            items=tuple(
+                (record["input_row"], record.get("status") or OK_STATUS)
+                for record in records
+                if record.get("input_row") is not None
+            ),
         )
         with path.open("ab") as stream:
             stream.write(payload)
@@ -179,10 +192,18 @@ class PartitionSink:
         self._pending: list[dict[str, Any]] = []
         self._first_pending_at = 0.0
         self.statuses: Counter[str] = Counter()
+        self.task_id: str | None = None
+        self.attempt_id: str | None = None
 
     @property
     def count(self) -> int:
         return sum(self.statuses.values())
+
+    def start_attempt(self, task_id: str, attempt_id: str) -> None:
+        """Later rows belong to this attempt; rows of the previous one are written first."""
+        self.flush()
+        self.task_id = task_id
+        self.attempt_id = attempt_id
 
     def emit(
         self, item: dict[str, Any], *, input_row: int | None = None, status: str | None = None
@@ -208,8 +229,8 @@ class PartitionSink:
 
     def flush(self) -> None:
         if self._pending:
-            self.writer.append(self._pending)
-            self._pending = []
+            pending, self._pending = self._pending, []
+            self.writer.append(pending, task_id=self.task_id, attempt_id=self.attempt_id)
 
     def close(self) -> None:
         self.flush()

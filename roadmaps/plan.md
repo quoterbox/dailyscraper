@@ -339,11 +339,17 @@ class BrowserManager(Protocol):
 
 | Родитель → слот | Слот → родитель |
 |---|---|
-| `RunTask(task, attempt, proxy, deadline)` | `TaskStarted(attempt_id)` |
-| `Stop(grace)` / `Cancel()` | `Progress(attempt_id, phase, url, items)` |
-| `Retire()` | `ItemsCommitted(attempt_id, partition, byte_range, row_ids)` |
+| `RunTask(task_id, attempt_id, kind, payload)` | `SlotReady(pid)` / `SlotFailed(error)` |
+| `Ack(ref, ok, error)` — ответ на отметку партиции | `TaskStarted(attempt_id)` |
+| `Cancel()` — прервать текущую задачу | `Progress(attempt_id)` — из проверки прерывания, не чаще раза в 5 с |
+| `Shutdown()` — закончить задачу, закрыть партиции, выйти | `ItemsCommitted(BatchCommit)`, `PartitionSealed(PartitionSeal)` — ждут `Ack` |
 | | `TaskFinished(attempt_id, TaskOutcome)` |
-| | `SessionBroken(reason)`; смерть процесса → `SlotDied(exitcode)` |
+| | `SessionBroken(reason)`; смерть процесса → событие `SlotExited` в родителе |
+
+Слот ждёт `Ack` на каждую пачку строк: отказ или тишина обрезают незарегистрированные
+байты и прерывают задачу, поэтому реестр в хранилище остаётся единственной правдой.
+Результат задачи каталога берётся из последней попытки, сохранившей строки; детали —
+по последнему статусу каждой строки входа.
 
 ### 6.4 Dispatcher (`dispatch/dispatcher.py`)
 

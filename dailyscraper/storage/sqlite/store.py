@@ -6,10 +6,13 @@ from pathlib import Path
 
 from dailyscraper.storage.sqlite.database import Database
 from dailyscraper.storage.sqlite.repositories import (
+    SQLiteCommands,
     SQLiteDeliveries,
     SQLiteEvents,
+    SQLiteLeases,
     SQLitePartitions,
     SQLiteRuns,
+    SQLiteTasks,
 )
 
 
@@ -30,6 +33,9 @@ class SQLiteStore:
         db = Database(self.path, busy_timeout_ms=busy_timeout_ms)
         self.runs = SQLiteRuns(db, clock)
         self.partitions = SQLitePartitions(db, clock)
+        self.tasks = SQLiteTasks(db, clock)
+        self.commands = SQLiteCommands(db, clock)
+        self.leases = SQLiteLeases(db, clock)
         self.events = SQLiteEvents(db)
         self.deliveries = SQLiteDeliveries(db)
 

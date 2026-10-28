@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from dailyscraper.app.session import open_pipeline
 from dailyscraper.domain import ErrorCategory, PageState
+from dailyscraper.execution.session import open_pipeline
 from dailyscraper.execution.sink import MemorySink
 from dailyscraper.schema import Inputs, load_scraper_package
 from dailyscraper.settings import load_settings

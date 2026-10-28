@@ -8,15 +8,22 @@ from pathlib import Path
 import pytest
 
 from dailyscraper.domain import (
+    AttemptStatus,
     BatchCommit,
+    CommandKind,
     DeliveryRecord,
     DeliveryStatus,
+    ErrorCategory,
     Event,
     EventLevel,
     PartitionRef,
     PartitionSeal,
     RunRecord,
     RunStatus,
+    TaskKind,
+    TaskOutcome,
+    TaskSpec,
+    TaskStatus,
 )
 from dailyscraper.storage import CommitConflict, StorageError, Store, open_store
 
@@ -221,3 +228,180 @@ def test_deliveries_are_recorded_and_updated(store: Store) -> None:
     (stored,) = store.deliveries.list("r1")
     assert stored.status is DeliveryStatus.DELIVERED
     assert (stored.attempts, stored.location, stored.files) == (2, "/exports/r1", ("catalog.csv",))
+
+
+def detail_task(task_id: str, scraper: str = "catalog", priority: int = 0, attempts: int = 3):
+    return TaskSpec(
+        task_id=task_id,
+        run_id="r1",
+        scraper=scraper,
+        kind=TaskKind.DETAIL,
+        payload={"rows": [1, 2, 3]},
+        priority=priority,
+        max_attempts=attempts,
+    )
+
+
+def test_claim_takes_tasks_in_priority_and_enqueue_order(store: Store) -> None:
+    store.tasks.enqueue([detail_task("a"), detail_task("b", priority=5), detail_task("c")])
+
+    claimed = [store.tasks.claim("r1", scrapers=["catalog"]).task_id for _ in range(3)]
+
+    assert claimed == ["b", "a", "c"]
+    assert store.tasks.claim("r1", scrapers=["catalog"]) is None
+    assert store.tasks.counts("r1") == {TaskStatus.RUNNING: 3}
+
+
+def test_claim_prefers_the_least_busy_scraper(store: Store) -> None:
+    store.tasks.enqueue([detail_task("a1", "a"), detail_task("a2", "a"), detail_task("b1", "b")])
+    store.tasks.claim("r1", scrapers=["a", "b"])
+
+    assert store.tasks.claim("r1", scrapers=["a", "b"]).scraper == "b"
+    assert store.tasks.claim("r1", scrapers=["b"]) is None
+
+
+def test_attempt_lifecycle_and_final_status(store: Store) -> None:
+    store.tasks.enqueue([detail_task("t")])
+    store.tasks.claim("r1", scrapers=["catalog"])
+    attempt = store.tasks.start("t", slot_id="catalog-1", host_id="h1")
+
+    assert (attempt.attempt_no, attempt.status) == (1, AttemptStatus.RUNNING)
+    task = store.tasks.finish(
+        attempt.attempt_id,
+        TaskOutcome(AttemptStatus.COMPLETED, rows=3, details={"pages": [3]}),
+    )
+
+    assert (task.status, task.attempts) == (TaskStatus.COMPLETED, 1)
+    (stored,) = store.tasks.attempts("r1", task_id="t")
+    assert (stored.status, stored.rows, stored.details) == (
+        AttemptStatus.COMPLETED,
+        3,
+        {"pages": [3]},
+    )
+    assert stored.finished_at is not None
+
+
+def test_failed_attempt_makes_the_task_failed(store: Store) -> None:
+    store.tasks.enqueue([detail_task("t")])
+    store.tasks.claim("r1", scrapers=["catalog"])
+    attempt = store.tasks.start("t", slot_id="s", host_id="h")
+
+    task = store.tasks.finish(
+        attempt.attempt_id,
+        TaskOutcome(AttemptStatus.FAILED, category=ErrorCategory.BLOCKED, error="403"),
+    )
+
+    assert task.status is TaskStatus.FAILED
+    assert (task.last_category, task.last_error) == (ErrorCategory.BLOCKED, "403")
+
+
+def test_rescheduled_task_waits_until_due_with_new_payload(store: Store) -> None:
+    store.tasks.enqueue([detail_task("t")])
+    store.tasks.claim("r1", scrapers=["catalog"])
+    first = store.tasks.start("t", slot_id="s", host_id="h")
+
+    task = store.tasks.reschedule(
+        first.attempt_id,
+        TaskOutcome(AttemptStatus.FAILED, category=ErrorCategory.TIMEOUT),
+        not_before="9999-01-01T00:00:00.000+00:00",
+        payload={"rows": [3]},
+        avoid=["proxy-1"],
+    )
+
+    assert (task.status, task.payload, task.avoid) == (
+        TaskStatus.PENDING,
+        {"rows": [3]},
+        ("proxy-1",),
+    )
+    assert store.tasks.claim("r1", scrapers=["catalog"]) is None
+
+    store.tasks.enqueue([detail_task("due")])
+    store.tasks.claim("r1", scrapers=["catalog"])
+    second = store.tasks.start("due", slot_id="s", host_id="h")
+    store.tasks.reschedule(
+        second.attempt_id,
+        TaskOutcome(AttemptStatus.FAILED),
+        not_before="2000-01-01T00:00:00.000+00:00",
+    )
+    retried = store.tasks.claim("r1", scrapers=["catalog"])
+    assert retried.task_id == "due"
+    assert store.tasks.start("due", slot_id="s", host_id="h").attempt_no == 2
+
+
+def test_closing_an_attempt_twice_changes_nothing(store: Store) -> None:
+    store.tasks.enqueue([detail_task("t")])
+    store.tasks.claim("r1", scrapers=["catalog"])
+    attempt = store.tasks.start("t", slot_id="s", host_id="h")
+    store.tasks.finish(attempt.attempt_id, TaskOutcome(AttemptStatus.COMPLETED))
+
+    task = store.tasks.finish(attempt.attempt_id, TaskOutcome(AttemptStatus.FAILED))
+
+    assert task.status is TaskStatus.COMPLETED
+
+
+def test_released_and_cancelled_tasks(store: Store) -> None:
+    store.tasks.enqueue([detail_task("a"), detail_task("b")])
+    claimed = store.tasks.claim("r1", scrapers=["catalog"])
+    with pytest.raises(StorageError):
+        store.tasks.start("b", slot_id="s", host_id="h")
+
+    store.tasks.release(claimed.task_id)
+    assert store.tasks.counts("r1") == {TaskStatus.PENDING: 2}
+    assert store.tasks.cancel_pending("r1") == 2
+    assert [task.status for task in store.tasks.list("r1")] == [TaskStatus.CANCELLED] * 2
+
+
+def test_item_statuses_follow_the_latest_commit(store: Store) -> None:
+    def detail_batch(commit_id, start, end, attempt_id, items):
+        return BatchCommit(
+            commit_id=commit_id,
+            partition=ref(),
+            start_offset=start,
+            end_offset=end,
+            first_record=1,
+            rows=len(items),
+            checksum="x",
+            task_id="t",
+            attempt_id=attempt_id,
+            items=items,
+        )
+
+    store.partitions.commit(detail_batch("c1", 0, 10, "t#1", ((1, "ok"), (2, "timeout"))))
+    store.partitions.commit(detail_batch("c2", 10, 20, "t#2", ((2, "ok"),)))
+
+    assert store.partitions.item_statuses("r1", "catalog") == {1: "ok", 2: "ok"}
+    assert store.partitions.item_statuses("r1", "catalog", attempt_id="t#1") == {1: "ok"}
+    commits = store.partitions.commits("r1", "catalog")
+    assert [(c.task_id, c.attempt_id) for c in commits] == [("t", "t#1"), ("t", "t#2")]
+
+
+def test_commands_are_pending_until_applied(store: Store) -> None:
+    stop = store.commands.issue("r1", CommandKind.STOP)
+    store.commands.issue("r2", CommandKind.KILL)
+
+    assert [c.command_id for c in store.commands.pending("r1")] == [stop.command_id]
+    store.commands.mark_applied(stop.command_id)
+    assert store.commands.pending("r1") == []
+
+
+def test_leases_limit_holders_per_host(store: Store) -> None:
+    def acquire(holder, host="h1", ttl=60.0):
+        return store.leases.acquire(
+            "browser", holder, host_id=host, run_id="r1", limit=2, ttl_seconds=ttl
+        )
+
+    assert acquire("s1") and acquire("s2")
+    assert not acquire("s3")
+    assert acquire("s1")
+    assert acquire("s3", host="h2")
+    assert store.leases.active("browser", host_id="h1") == 2
+
+    store.leases.release("s1")
+    assert acquire("s3")
+
+
+def test_expired_leases_free_their_place(store: Store) -> None:
+    assert store.leases.acquire("browser", "s1", host_id="h", run_id="r1", limit=1, ttl_seconds=-1)
+
+    assert store.leases.active("browser", host_id="h") == 0
+    assert store.leases.acquire("browser", "s2", host_id="h", run_id="r1", limit=1, ttl_seconds=60)

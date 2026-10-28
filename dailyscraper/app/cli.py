@@ -35,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "run":
             return _run(settings, store, args)
+        if args.command == "stop":
+            return _stop(settings, store, args.run_id, kill=args.kill)
+        RunService(settings, store).reconcile_orphans()
         if args.runs_command == "show":
             return _show(settings, store, args.run_id)
         return _list(store, args.limit, args.project)
@@ -43,13 +46,13 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(settings: Settings, store: Store, args: argparse.Namespace) -> int:
-    report = RunService(settings, store).run(RunRequest(args.scraper, args.input))
+    report = RunService(settings, store).run(RunRequest(tuple(args.scrapers), args.input))
     run = report.run
     print(f"\nRun {run.run_id}: {run.status.value}")
     if run.error:
         print(f"Error: {run.error}")
     for name, scraper in (run.summary or {}).get("scrapers", {}).items():
-        print(f"{name}: {scraper['rows']} rows {scraper['statuses']}")
+        print(f"{name}: {scraper['rows']} rows {scraper['statuses']} tasks {scraper['tasks']}")
     for paths in report.outputs.values():
         for path in paths:
             print(f"  {path}")
@@ -57,6 +60,19 @@ def _run(settings: Settings, store: Store, args: argparse.Namespace) -> int:
         target = delivery.location or delivery.error or ""
         print(f"Delivery {delivery.name}: {delivery.status.value} {target}")
     return EXIT_CODES[run.status]
+
+
+def _stop(settings: Settings, store: Store, run_id: str, *, kill: bool) -> int:
+    run = store.runs.get(run_id)
+    if run is None:
+        print(f"Run {run_id} not found.", file=sys.stderr)
+        return 1
+    if run.status.is_terminal:
+        print(f"Run {run_id} is already {run.status.value}.")
+        return 0
+    RunService(settings, store).stop(run_id, kill=kill)
+    print(f"{'Kill' if kill else 'Stop'} requested for run {run_id}.")
+    return 0
 
 
 def _list(store: Store, limit: int, project: str | None) -> int:
@@ -102,10 +118,16 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dailyscraper")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    run = commands.add_parser("run", help="run one scraper package")
-    run.add_argument("scraper")
-    run.add_argument("--input", type=Path, help="CSV with detail rows instead of the links")
-    run.add_argument("--headed", action="store_true", help="show the browser window")
+    run = commands.add_parser("run", help="run scraper packages in parallel slots")
+    run.add_argument("scrapers", nargs="+")
+    run.add_argument(
+        "--input", type=Path, help="CSV with detail rows instead of the links (one scraper)"
+    )
+    run.add_argument("--headed", action="store_true", help="show the browser windows")
+
+    stop = commands.add_parser("stop", help="stop a running run")
+    stop.add_argument("run_id")
+    stop.add_argument("--kill", action="store_true", help="kill the slots at once")
 
     runs = commands.add_parser("runs", help="history of runs")
     runs.add_argument("--limit", type=int, default=20)

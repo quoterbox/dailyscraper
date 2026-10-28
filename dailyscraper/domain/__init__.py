@@ -18,12 +18,27 @@ from dailyscraper.domain.events import (
 )
 from dailyscraper.domain.pages import PageOutcome, PageState, PageType
 from dailyscraper.domain.runs import DEFAULT_PROJECT_ID, RunRecord, RunStatus, new_run_id
+from dailyscraper.domain.tasks import (
+    Attempt,
+    AttemptStatus,
+    Command,
+    CommandKind,
+    Task,
+    TaskKind,
+    TaskOutcome,
+    TaskSpec,
+    TaskStatus,
+)
 
 __all__ = [
     "DEFAULT_PROJECT_ID",
     "EVENT_SCHEMA_VERSION",
     "PARTITION_RECORD_VERSION",
+    "Attempt",
+    "AttemptStatus",
     "BatchCommit",
+    "Command",
+    "CommandKind",
     "CommitRecord",
     "DeliveryRecord",
     "DeliveryStatus",
@@ -38,5 +53,10 @@ __all__ = [
     "PartitionState",
     "RunRecord",
     "RunStatus",
+    "Task",
+    "TaskKind",
+    "TaskOutcome",
+    "TaskSpec",
+    "TaskStatus",
     "new_run_id",
 ]

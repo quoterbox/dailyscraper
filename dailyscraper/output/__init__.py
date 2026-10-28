@@ -9,7 +9,7 @@ from dailyscraper.output.delivery import (
     destination_for,
 )
 from dailyscraper.output.formats import columns_of, iter_csv, write_output
-from dailyscraper.output.merge import scraper_rows
+from dailyscraper.output.merge import scraper_records, scraper_rows
 
 __all__ = [
     "Deliverer",
@@ -20,6 +20,7 @@ __all__ = [
     "destination_for",
     "iter_csv",
     "make_archive",
+    "scraper_records",
     "scraper_rows",
     "write_output",
 ]

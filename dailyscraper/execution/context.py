@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from dailyscraper.actions import ScraperActions
 from dailyscraper.execution.navigator import Navigator
 from dailyscraper.execution.sink import ItemSink
+from dailyscraper.execution.snapshots import SnapshotWriter
 from dailyscraper.execution.timing import Pacer
 from dailyscraper.schema import ScraperDefinition
 from dailyscraper.transport import BrowserPage, ElementFinder
@@ -19,3 +20,4 @@ class PageContext:
     actions: ScraperActions
     sink: ItemSink
     pacer: Pacer
+    snapshots: SnapshotWriter | None = None

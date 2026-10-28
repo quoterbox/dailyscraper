@@ -8,6 +8,7 @@ from dailyscraper.execution.context import PageContext
 from dailyscraper.execution.loader import load_package_class
 from dailyscraper.execution.navigator import Navigator
 from dailyscraper.execution.sink import ItemSink
+from dailyscraper.execution.snapshots import SnapshotWriter
 from dailyscraper.execution.timing import Pacer
 from dailyscraper.pipelines import DefaultPipeline
 from dailyscraper.schema import ScraperPackage
@@ -21,6 +22,7 @@ def open_pipeline(
     settings: Settings,
     sink: ItemSink,
     pacer: Pacer | None = None,
+    snapshots: SnapshotWriter | None = None,
 ) -> Iterator[DefaultPipeline]:
     """One browser session running one scraper package in the current process."""
 
@@ -48,5 +50,6 @@ def open_pipeline(
                 actions=actions,
                 sink=sink,
                 pacer=pacer,
+                snapshots=snapshots,
             )
         )

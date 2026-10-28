@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Protocol
 
 from dailyscraper.domain import (
+    Attempt,
     BatchCommit,
+    Command,
+    CommandKind,
     CommitRecord,
     DeliveryRecord,
     Event,
@@ -13,6 +16,10 @@ from dailyscraper.domain import (
     PartitionState,
     RunRecord,
     RunStatus,
+    Task,
+    TaskOutcome,
+    TaskSpec,
+    TaskStatus,
 )
 
 
@@ -56,6 +63,79 @@ class PartitionRegistry(Protocol):
         """Commits in registration order."""
         ...
 
+    def item_statuses(
+        self, run_id: str, scraper: str, *, attempt_id: str | None = None
+    ) -> dict[int, str]:
+        """Latest status of each registered detail input row, optionally of one attempt."""
+        ...
+
+
+class TaskRepository(Protocol):
+    def enqueue(self, specs: Sequence[TaskSpec]) -> None: ...
+
+    def claim(self, run_id: str, *, scrapers: Collection[str]) -> Task | None:
+        """Take the next due pending task of one of ``scrapers`` and mark it running.
+
+        The least busy scraper goes first, then priority, then enqueue order.
+        """
+        ...
+
+    def start(
+        self, task_id: str, *, slot_id: str, host_id: str, proxy_id: str | None = None
+    ) -> Attempt: ...
+
+    def release(self, task_id: str) -> None:
+        """Return a claimed task that never started to the pending ones."""
+        ...
+
+    def finish(self, attempt_id: str, outcome: TaskOutcome) -> Task:
+        """Close the attempt; the task becomes final with the outcome's status."""
+        ...
+
+    def reschedule(
+        self,
+        attempt_id: str,
+        outcome: TaskOutcome,
+        *,
+        not_before: str,
+        payload: Mapping[str, Any] | None = None,
+        avoid: Sequence[str] = (),
+    ) -> Task:
+        """Close the attempt and make the task pending again, due at ``not_before``."""
+        ...
+
+    def cancel_pending(self, run_id: str) -> int: ...
+
+    def get(self, task_id: str) -> Task | None: ...
+
+    def list(self, run_id: str) -> list[Task]: ...
+
+    def attempts(self, run_id: str, *, task_id: str | None = None) -> list[Attempt]: ...
+
+    def counts(self, run_id: str) -> dict[TaskStatus, int]: ...
+
+
+class CommandLog(Protocol):
+    def issue(self, run_id: str, kind: CommandKind) -> Command: ...
+
+    def pending(self, run_id: str) -> list[Command]: ...
+
+    def mark_applied(self, command_id: str) -> None: ...
+
+
+class LeaseRepository(Protocol):
+    """Host-wide resource limits shared by all runs on the machine."""
+
+    def acquire(
+        self, kind: str, holder: str, *, host_id: str, run_id: str, limit: int, ttl_seconds: float
+    ) -> bool: ...
+
+    def renew(self, holders: Sequence[str], *, ttl_seconds: float) -> None: ...
+
+    def release(self, holder: str) -> None: ...
+
+    def active(self, kind: str, *, host_id: str) -> int: ...
+
 
 class EventLog(Protocol):
     def append(self, events: Sequence[Event]) -> None: ...
@@ -74,6 +154,9 @@ class DeliveryLog(Protocol):
 class Store(Protocol):
     runs: RunRepository
     partitions: PartitionRegistry
+    tasks: TaskRepository
+    commands: CommandLog
+    leases: LeaseRepository
     events: EventLog
     deliveries: DeliveryLog
 

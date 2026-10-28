@@ -91,7 +91,85 @@ CREATE TABLE deliveries (
 CREATE INDEX deliveries_by_run ON deliveries(run_id, at);
 """
 
-MIGRATIONS: tuple[Migration, ...] = (Migration(1, "baseline", BASELINE),)
+TASKS = """
+ALTER TABLE runs ADD COLUMN host_id TEXT;
+ALTER TABLE runs ADD COLUMN pid INTEGER;
+ALTER TABLE commits ADD COLUMN task_id TEXT;
+ALTER TABLE commits ADD COLUMN attempt_id TEXT;
+
+CREATE TABLE tasks (
+    task_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    scraper TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    priority INTEGER NOT NULL,
+    seq INTEGER NOT NULL,
+    attempts INTEGER NOT NULL,
+    max_attempts INTEGER NOT NULL,
+    not_before TEXT,
+    avoid_json TEXT NOT NULL,
+    last_category TEXT,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE (run_id, seq)
+);
+CREATE INDEX tasks_due ON tasks(run_id, status, scraper, not_before);
+
+CREATE TABLE attempts (
+    attempt_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    attempt_no INTEGER NOT NULL,
+    slot_id TEXT NOT NULL,
+    host_id TEXT NOT NULL,
+    proxy_id TEXT,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    category TEXT,
+    rows INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    details_json TEXT NOT NULL,
+    UNIQUE (task_id, attempt_no)
+);
+CREATE INDEX attempts_by_run ON attempts(run_id, started_at);
+
+CREATE TABLE item_statuses (
+    run_id TEXT NOT NULL,
+    scraper TEXT NOT NULL,
+    input_row INTEGER NOT NULL,
+    attempt_id TEXT,
+    status TEXT NOT NULL,
+    commit_id TEXT NOT NULL,
+    PRIMARY KEY (run_id, scraper, input_row)
+);
+CREATE INDEX item_statuses_by_attempt ON item_statuses(attempt_id);
+
+CREATE TABLE commands (
+    command_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    applied_at TEXT
+);
+CREATE INDEX commands_pending ON commands(run_id, applied_at);
+
+CREATE TABLE leases (
+    holder TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    host_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+CREATE INDEX leases_by_kind ON leases(kind, host_id, expires_at);
+"""
+
+MIGRATIONS: tuple[Migration, ...] = (
+    Migration(1, "baseline", BASELINE),
+    Migration(2, "tasks_attempts_commands_leases", TASKS),
+)
 
 
 def schema_version(connection: sqlite3.Connection) -> int:

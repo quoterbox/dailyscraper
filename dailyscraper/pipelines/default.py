@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -66,14 +67,20 @@ class DefaultPipeline:
         result.emitted = self._emitted - emitted_before
         return result
 
-    def run_rows(self, rows: list[Row]) -> PipelineResult:
-        """Detail pages for input rows; each row is emitted with its 1-based input position."""
+    def run_rows(
+        self, rows: list[Row], *, positions: Sequence[int] | None = None
+    ) -> PipelineResult:
+        """Detail pages for input rows; each row is emitted with its 1-based input position.
+
+        ``positions`` are the rows' positions in the whole input when ``rows`` is
+        a planned part of it; then ``start_item``/``last_item`` are already applied.
+        """
         if self.detail is None:
             raise ValueError(f"{self.ctx.definition.name} has no detail page for input rows")
         result = PipelineResult()
         self.ctx.actions.before_run()
         emitted_before = self._emitted
-        result.detail_results = self.run_details(rows, input_positions=True)
+        result.detail_results = self.run_details(rows, input_positions=True, positions=positions)
         self.ctx.actions.after_run()
         result.emitted = self._emitted - emitted_before
         return result
@@ -94,6 +101,7 @@ class DefaultPipeline:
             if not navigation.ok:
                 result.outcome = navigator.failed_open(url, PageType.LIST, navigation.error)
                 result.category = category_for_state(result.outcome.state)
+                self._snapshot("list", result.outcome)
                 return result
             self._login(link)
             actions.after_first_open(link)
@@ -102,6 +110,7 @@ class DefaultPipeline:
                 result.category = category_for_state(
                     result.outcome.state, result.outcome.http_status
                 )
+                self._snapshot("list", result.outcome)
                 return result
             actions.before_list(link)
             result.list_result = self.list.run(link, result.outcome, on_page=emit_pages)
@@ -111,18 +120,26 @@ class DefaultPipeline:
         return result
 
     def run_details(
-        self, rows: list[Row], *, input_positions: bool = False
+        self,
+        rows: list[Row],
+        *,
+        input_positions: bool = False,
+        positions: Sequence[int] | None = None,
     ) -> list[DetailRowResult]:
         page = self.detail.page
         results = []
-        for position, row in enumerate(rows, start=1):
-            if position < page.start_item:
-                continue
-            if page.last_item and position > page.last_item:
-                break
+        numbered = zip(positions, rows, strict=True) if positions is not None else None
+        for position, row in numbered or enumerate(rows, start=1):
+            if numbered is None:
+                if position < page.start_item:
+                    continue
+                if page.last_item and position > page.last_item:
+                    break
             self.ctx.pacer.check_interrupted()
             detail = self.detail.run_row(row)
             results.append(detail)
+            if detail.category is not None and detail.category is not ErrorCategory.NOT_FOUND:
+                self._snapshot("detail", detail.outcome)
             self._emit(
                 [detail.row],
                 input_row=position if input_positions else None,
@@ -138,6 +155,11 @@ class DefaultPipeline:
         if not self.auth.login():
             logger.error("Login failed for %s", link)
         self.ctx.actions.after_login()
+
+    def _snapshot(self, kind: str, outcome: PageOutcome | None) -> None:
+        if self.ctx.snapshots is not None:
+            reason = outcome.reason if outcome is not None else "no outcome"
+            self.ctx.snapshots.capture(self.ctx.page, f"{kind}-{reason}")
 
     def _emit(
         self, rows: list[Row], *, input_row: int | None = None, status: str | None = None

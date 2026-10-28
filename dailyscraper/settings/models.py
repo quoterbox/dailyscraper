@@ -20,6 +20,27 @@ class ScraperSelection(SettingsModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     aliases: tuple[str, ...] = ()
     proxy_names: tuple[str, ...] = ()
+    max_parallel: int | None = Field(None, ge=1)
+
+
+class RuntimeSettings(SettingsModel):
+    host_id: str | None = Field(None, description="Defaults to the machine's host name")
+    max_slots: int = Field(4, ge=1, description="Browser slots of this machine for all runs")
+    max_parallel_per_scraper: int = Field(1, ge=1)
+    slot_memory_mb: int = Field(400, ge=1)
+    memory_reserve_mb: int = Field(1024, ge=0)
+    items_per_task: int = Field(50, ge=1)
+    task_attempts: int = Field(3, ge=1)
+    retry_delay_seconds: float = Field(5.0, ge=0)
+    retry_max_delay_seconds: float = Field(120.0, ge=0)
+    stall_timeout_seconds: float = Field(600.0, gt=0)
+    task_deadline_seconds: float = Field(7200.0, gt=0)
+    slot_start_timeout_seconds: float = Field(120.0, gt=0)
+    stop_grace_seconds: float = Field(30.0, ge=0)
+    commit_ack_timeout_seconds: float = Field(60.0, gt=0)
+    lease_ttl_seconds: float = Field(60.0, gt=0)
+    poll_interval_seconds: float = Field(0.5, gt=0)
+    snapshots_per_slot: int = Field(20, ge=0)
 
 
 class Viewport(SettingsModel):
@@ -95,7 +116,14 @@ class Settings(SettingsModel):
     browser: BrowserSettings = BrowserSettings()
     storage: StorageSettings = StorageSettings()
     output: OutputSettings = OutputSettings()
+    runtime: RuntimeSettings = RuntimeSettings()
     scrapers: tuple[ScraperSelection, ...] = ()
+
+    def max_parallel(self, scraper: str) -> int:
+        selection = next((item for item in self.scrapers if item.name == scraper), None)
+        if selection is not None and selection.max_parallel is not None:
+            return selection.max_parallel
+        return self.runtime.max_parallel_per_scraper
 
     @property
     def database_path(self) -> Path:

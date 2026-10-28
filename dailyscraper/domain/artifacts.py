@@ -19,7 +19,9 @@ class BatchCommit:
     """Rows durably appended to a partition file, waiting to be registered.
 
     ``path`` is relative to the run directory; ``end_offset`` becomes the
-    partition's committed size once the commit is registered.
+    partition's committed size once the commit is registered. ``items`` are
+    the ``(input_row, status)`` pairs of detail rows, registered atomically
+    with the batch.
     """
 
     commit_id: str
@@ -29,6 +31,9 @@ class BatchCommit:
     first_record: int
     rows: int
     checksum: str
+    task_id: str | None = None
+    attempt_id: str | None = None
+    items: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -57,3 +62,5 @@ class CommitRecord:
     first_record: int
     rows: int
     checksum: str
+    task_id: str | None = None
+    attempt_id: str | None = None

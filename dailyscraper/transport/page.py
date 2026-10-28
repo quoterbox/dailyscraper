@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from playwright.sync_api import Page
 
@@ -70,6 +71,12 @@ class BrowserPage:
             lambda: self._page.locator("body").inner_text(timeout=2_000),
             "",
         )
+
+    def content(self) -> str:
+        return self._page.content()
+
+    def screenshot(self, path: Path) -> None:
+        self._page.screenshot(path=str(path), timeout=self.settings.action_timeout_ms)
 
     def wait(self, milliseconds: float) -> None:
         if milliseconds > 0:

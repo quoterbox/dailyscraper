@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from typing import Any
 
+from dailyscraper.domain import CommitRecord
 from dailyscraper.storage.contracts import PartitionRegistry, StorageError
 from dailyscraper.storage.layout import RunLayout
 
@@ -14,10 +15,15 @@ class PartitionIntegrityError(StorageError):
 
 
 def iter_committed_records(
-    registry: PartitionRegistry, layout: RunLayout, run_id: str, scraper: str
+    registry: PartitionRegistry,
+    layout: RunLayout,
+    run_id: str,
+    scraper: str,
+    *,
+    commits: Iterable[CommitRecord] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Records of registered commits in registration order; unregistered bytes are ignored."""
-    for commit in registry.commits(run_id, scraper):
+    for commit in registry.commits(run_id, scraper) if commits is None else commits:
         path = layout.resolve(commit.partition.path)
         size = commit.end_offset - commit.start_offset
         try:
