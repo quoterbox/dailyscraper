@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
 import pytest
 
 from dailyscraper.app.session import open_pipeline
-from dailyscraper.app.single import read_rows
 from dailyscraper.domain import ErrorCategory, PageState
 from dailyscraper.execution.sink import MemorySink
 from dailyscraper.schema import Inputs, load_scraper_package
@@ -18,6 +18,11 @@ pytestmark = pytest.mark.browser
 @pytest.fixture(scope="module")
 def settings(project_root: Path):
     return load_settings(project_root)
+
+
+def read_rows(path: Path, inputs: Inputs) -> list[dict[str, str]]:
+    with path.open(encoding=inputs.encoding, newline="") as stream:
+        return [dict(row) for row in csv.DictReader(stream, delimiter=inputs.delimiter)]
 
 
 def load(settings, name: str):

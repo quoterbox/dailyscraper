@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from dailyscraper.settings.interpolation import MissingVariableError, interpolat
 SCRAPER_FILE = "scraper.json"
 PIPELINE_FILE = "pipeline.py"
 ACTIONS_FILE = "actions.py"
+VERSIONED_SUFFIXES = (".json", ".py")
 
 
 class ScraperPackageError(ValueError):
@@ -24,6 +26,7 @@ class ScraperPackageError(ValueError):
 class ScraperPackage:
     root: Path
     definition: ScraperDefinition
+    version: str
 
     @property
     def name(self) -> str:
@@ -65,7 +68,21 @@ def load_scraper_package(root: Path, *, variables: Mapping[str, str]) -> Scraper
             f"{source}: name {definition.name!r} must match the package directory {root.name!r}"
         )
     _compile_templates(definition, source)
-    return ScraperPackage(root=root, definition=definition)
+    return ScraperPackage(root=root, definition=definition, version=package_version(root))
+
+
+def package_version(root: Path) -> str:
+    """Content hash of the package's ``.json`` and ``.py`` files, independent of their location."""
+    digest = hashlib.sha256()
+    files = sorted(
+        path
+        for path in Path(root).rglob("*")
+        if path.is_file() and path.suffix in VERSIONED_SUFFIXES and "__pycache__" not in path.parts
+    )
+    for path in files:
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    return digest.hexdigest()[:16]
 
 
 def _compile_templates(definition: ScraperDefinition, source: Path) -> None:

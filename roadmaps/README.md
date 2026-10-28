@@ -49,3 +49,7 @@
 | [0009](decisions/0009-scraper-actions-hooks.md) | Hooks `ScraperActions` | принято |
 | [0010](decisions/0010-settings-loading.md) | Загрузка настроек без Dynaconf | принято |
 | [0011](decisions/0011-page-execution-contract.md) | Контракт исполнения страниц | принято |
+| [0012](decisions/0012-transports-isolation-and-sync-core.md) | Транспорты, режимы изоляции браузера, синхронное ядро | принято |
+| [0013](decisions/0013-scaling-and-replaceable-backends.md) | Производительность, сменные бэкенды, несколько машин | принято |
+| [0014](decisions/0014-captcha-solvers-and-ai-observer.md) | Решение капч через API и ИИ-наблюдатель | принято |
+| [0015](decisions/0015-open-core-resources-and-runs.md) | Открытое ядро, ресурсный профиль, запуски и доставка | принято |

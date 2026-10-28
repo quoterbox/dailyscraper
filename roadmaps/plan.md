@@ -7,9 +7,19 @@
 ## 1. Цель и исходные материалы
 
 dailyscraper — фреймворк для воспроизводимого сбора каталогов и карточек товаров
-через браузер: параллельные браузеры, распределение прокси (в том числе
+через браузер или HTTP: параллельные слоты, распределение прокси (в том числе
 резидентских), preflight и health-проверки, распознавание блокировок, retry,
 stop/resume и надёжный экспорт.
+
+Ядро — открытая библиотека с CLI; HTTP API, веб-интерфейс и облачные надстройки
+строятся поверх сервисов `app/` и в ядро не входят ([0015](decisions/0015-open-core-resources-and-runs.md)). Основной сценарий —
+одна машина: 10–15 одновременных сайтов на 8–16 ГБ памяти и 2–4 ядрах.
+
+Фреймворк рассчитан на эксплуатацию с высокой нагрузкой и отказоустойчивостью:
+от одной машины до нескольких, если одной не хватает, с заменой SQLite и локальных файлов на
+PostgreSQL, Redis и S3-совместимое хранилище без переписывания логики
+([0013](decisions/0013-scaling-and-replaceable-backends.md)). Решение капч через API и ИИ-наблюдатель подключаются как расширения
+([0014](decisions/0014-captcha-solvers-and-ai-observer.md)).
 
 Собирается из двух предшественников ([0001](decisions/0001-clean-repository-and-naming.md)):
 
@@ -37,14 +47,27 @@ jobs, оркестрация run, ранняя привязка прокси к 
 3. **Один исполнитель браузеров.** Обычные задачи, discovery и health-probe идут
    через `BrowserManager` в процессах-слотах, которые можно убить по отдельности
    ([0002](decisions/0002-sync-dispatcher-and-process-slots.md)).
-4. **Один писатель SQLite.** Пишет только родитель; слоты пишут данные в
-   partition-файлы и сообщают о коммите.
+4. **Один писатель хранилища.** В общее хранилище пишет только родитель
+   (на нескольких машинах — координатор и агенты хостов); слоты пишут данные в
+   partition-файлы и сообщают о коммите пачками.
 5. **Типизированные исходы.** `PageOutcome`, `TaskOutcome`, `ErrorCategory` —
    enum и dataclass, а не строки в dict. Классификатор один.
 6. **Зависимости только вниз** (раздел 4.2), проверяется тестом.
 7. **Конфигурация неизменяема на время run.** Снимок настроек передаётся слотам
    при старте, слоты не читают конфиг с диска.
 8. **Чистые имена** ([0001](decisions/0001-clean-repository-and-naming.md)).
+9. **Сменные бэкенды.** Очередь, run, команды, leases, health, события и
+   артефакты — за интерфейсами с контрактными тестами; SQLite и локальные файлы —
+   первые реализации ([0013](decisions/0013-scaling-and-replaceable-backends.md)).
+10. **Сериализуемые сообщения и идемпотентность.** Протокол слота и события —
+    версионируемые модели, сериализуемые в JSON; повторная доставка не меняет
+    результат ([0013](decisions/0013-scaling-and-replaceable-backends.md)).
+11. **Экономия ресурсов по умолчанию.** Новый браузерный слот — только при
+    бюджете памяти; блокировка тяжёлых ресурсов включена; HTTP предпочтителен,
+    когда сайт позволяет ([0015](decisions/0015-open-core-resources-and-runs.md)).
+12. **Расширения через интерфейсы.** Транспорты, решатели капч, ИИ-наблюдатель
+    подключаются к ядру через интерфейсы и не меняют исполнители страниц
+    ([0012](decisions/0012-transports-isolation-and-sync-core.md), [0014](decisions/0014-captcha-solvers-and-ai-observer.md)).
 
 ## 3. Схема
 
@@ -63,14 +86,19 @@ Dispatcher (родитель, один поток, цикл событий)
  └── RetryPolicy / ErrorClassifier (чистые функции)
         │  pipe: RunTask / Stop / Cancel ▼     ▲ Started / Progress / ItemsCommitted / Finished / Died
         ▼
-Slot-процесс (один Chromium на пару site+proxy, много задач)
+Slot-процесс (браузерный: Chromium на пару site+proxy | HTTP-клиент; много задач)
  └── SlotRuntime
       ├── Navigator       open → bootstrap/warmup → PageStateDetector → intervention
       ├── Pipeline        DefaultPipeline | pipeline.py пакета
       │    └── PageScrapers: Auth / List / Detail (+ стратегии)
       ├── ScraperActions  hooks пакета
-      └── ItemSink        partition writer + fsync → ItemsCommitted
+      └── ItemSink        partition writer + fsync → ItemsCommitted (пачками)
 ```
+
+На одной машине координатор (очередь, ворота, прокси, retry) и агент хоста
+(`BrowserManager` и слоты) работают в одном родительском процессе. На нескольких
+машинах это разные процессы с общим хранилищем и тем же протоколом
+слота ([0013](decisions/0013-scaling-and-replaceable-backends.md), раздел 6.9).
 
 ## 4. Структура пакета и слои
 
@@ -87,12 +115,13 @@ dailyscraper/
   actions/        ScraperActions (hooks)                                      ← SDK
   execution/      SlotRuntime, Navigator, ItemSink, CompiledTemplate
   detection/      page state, ErrorClassifier                                 ← SDK (маркеры)
-  transport/      Playwright-адаптер, ElementFinder, interventions
+  transport/      интерфейсы страницы и элементов; реализации Playwright и HTTP, interventions
   browsers/       BrowserManager, Slot, точка входа слота, сессии, профили, leases, watchdog, termination
   proxies/        sources, PoolSnapshot, Allocator, HealthRegistry, network check
   tasks/          TaskQueue, planner, discovery, RetryPolicy, inputs
   dispatch/       Dispatcher, Gates, fairness
-  storage/        SQLite store (repositories, migrations, commands), data_path, partitions, checkpoints
+  storage/        интерфейсы хранилища; SQLite-адаптер (repositories, migrations, commands), data_path, partitions, checkpoints, артефакты
+  integrations/   решатели капч (адаптеры сервисов)
   output/         merge, форматы, summaries
   app/            RunService, CLI, finalization, recovery
   observability/  события, консоль, уведомления
@@ -117,7 +146,7 @@ tests/            unit, integration, acceptance, harness, fixtures
 | 6 | `dispatch`, `maintenance` |
 | 5 | `tasks`, `proxies`, `browsers`, `output`, `observability` |
 | 4 | `storage` |
-| 3 | `execution`, `pipelines`, `page_scrapers`, `actions` |
+| 3 | `execution`, `pipelines`, `page_scrapers`, `actions`, `integrations` |
 | 2 | `transport`, `detection` |
 | 1 | `schema`, `pages`, `settings`, `testing` |
 | 0 | `domain` |
@@ -288,15 +317,25 @@ class BrowserManager(Protocol):
     def shutdown(self, grace: float) -> None: ...
 ```
 
-- Собственные `multiprocessing.Process` (spawn). Слот держит одну
-  Playwright-сессию на пару `(site_key, ProxyId)`; ротация сессии по
-  `max_age` / `max_jobs` / `max_items`.
+- Собственные `multiprocessing.Process` (spawn). Браузерный слот держит одну
+  сессию на пару `(site_key, ProxyId)`; ротация сессии по
+  `max_age` / `max_jobs` / `max_items`. HTTP-слот — тот же протокол без браузера
+  и с N дорожками: до N задач одновременно, у каждой своя прокси ([0013](decisions/0013-scaling-and-replaceable-backends.md)).
+- Режим изоляции браузера выбирается на парсер
+  ([0012](decisions/0012-transports-isolation-and-sync-core.md)): `persistent`
+  (отдельный Chromium, профиль, MV3, по умолчанию), `ephemeral` (отдельный
+  Chromium без профиля), `shared` (общий Chromium на хост, слоты подключаются по
+  CDP и создают по контексту; после замеров). Мощность считается по виду слота.
 - `kill` убивает только этот слот и его дерево (логика из MVP).
 - Watchdog — по событиям `Progress` из pipe.
+- Новый браузерный слот запускается только при наличии бюджета памяти машины;
+  иначе задача ждёт ([0015](decisions/0015-open-core-resources-and-runs.md)).
 - Leases хоста (браузеры всего, site+proxy, профиль) берутся на время жизни
   слота. Лимиты — настройка хоста в SQLite, а не значения из запроса.
-- Слот не открывает SQLite и не читает конфиг с диска; точка входа —
+- Слот не открывает хранилище и не читает конфиг с диска; точка входа —
   `browsers/slot_main.py`.
+- Сообщения протокола — версионируемые модели, сериализуемые в JSON; у попыток,
+  пачек строк и команд свои идентификаторы, повторная доставка безопасна.
 
 | Родитель → слот | Слот → родитель |
 |---|---|
@@ -334,6 +373,10 @@ while not stop_requested and queue.has_work():
 
 `handle(SlotDied)`: текущая задача получает `BROWSER_CLOSED`, незавершённая часть
 вычисляется по закоммиченным строкам. Семантика stop/cancel/kill и grace — из MVP.
+
+`queue.claim` учитывает `max_parallel` парсера (и сайта, если задан) вместе с
+лимитами хоста: «15 одновременных задач для сайта A» — настройка парсера, а не
+число процессов.
 
 ### 6.5 Gates и preflight (`dispatch/gates.py`)
 
@@ -395,6 +438,64 @@ class DefaultPipeline:
   диапазонами `row_id`. Inline — только при `open_detail_by_click` или явном
   флаге.
 
+### 6.8 Хранилище и бэкенды (`storage/`)
+
+| Интерфейс | Первая реализация | Для нескольких машин |
+|---|---|---|
+| Очередь задач и попыток | SQLite | PostgreSQL (`FOR UPDATE SKIP LOCKED`) |
+| Run, команды, события | SQLite | PostgreSQL; команды — с уведомлением через Redis |
+| Leases, лимиты хоста | SQLite | PostgreSQL или Redis с TTL |
+| Health прокси | SQLite + TTL | Redis с TTL |
+| Артефакты: partitions, снимки ошибок, экспорт | локальная ФС | S3-совместимое хранилище |
+
+- Модули выше `storage/` не импортируют `sqlite3` и не пишут SQL.
+- Контрактные тесты: один набор тестов поведения на каждый интерфейс, который
+  запускается против каждой реализации.
+- Время leases и `not_before` — часы хранилища; идентификаторы строковые.
+- Run, задачи, события и артефакты несут `project_id` (по умолчанию
+  `default`) — фундамент для нескольких клиентов без логики клиентов в ядре
+  ([0015](decisions/0015-open-core-resources-and-runs.md)).
+
+### 6.9 Несколько машин
+
+- **Координатор**: очередь, ворота, выбор прокси, retry, финализация run.
+  **Агент хоста**: `BrowserManager`, слоты, лимиты своей машины, heartbeat.
+- Агенты получают задачи и сообщают события через те же модели протокола, что
+  слоты — родителю. Lease машины истекает без heartbeat, её задачи возвращаются
+  в очередь.
+- Attempts, leases, слоты и события несут `host_id`.
+- Реализация — этап 10; до него соблюдаются только правила фундамента:
+  интерфейсы хранилища, сериализуемый протокол, идемпотентность, `host_id`.
+
+### 6.10 Интеграции ([0014](decisions/0014-captcha-solvers-and-ai-observer.md))
+
+- **Решение капч.** `CaptchaSolver` вызывается из точки вмешательства
+  `StateWaiter`; цепочка «решатель → ручное решение → отказ» настраивается на
+  парсер; расходы и исходы — в событиях, лимиты — на run и парсер.
+- **Ручное решение и уведомления — раньше автоматики.** Слот держит страницу,
+  отправляет уведомление (почта, Telegram) и ждёт решения человеком в пределах
+  таймаута; Dispatcher и watchdog видят состояние «ждёт вмешательства».
+  Решатели через сервисы и ИИ-модели встают в ту же цепочку позже.
+- **ИИ-наблюдатель** — отдельный компонент вне ядра. Получает события, снимки
+  страниц при ошибках и версии пакетов; изменения `scraper.json` создаёт как
+  предложения, которые проходят проверку схемы, повтор извлечения на снимках и
+  контрольный прогон. Применение — человеком или автоматически по политике
+  парсера, с новой версией пакета и откатом.
+
+### 6.11 Запуски, история и доставка ([0015](decisions/0015-open-core-resources-and-runs.md))
+
+- **История.** Запуск хранится со статусом, временем, снимком настроек,
+  версиями пакетов, итогами и файлами; CLI показывает список и открывает
+  результаты любого запуска. Срок хранения — retention.
+- **Ключ товара.** Строка результата получает `item_key` из `identity_fields`
+  пакета или ссылки на detail; по нему позже строятся история и сравнение
+  запусков.
+- **Версия пакета** — хэш содержимого `scraper.json` и `.py`.
+- **Доставка.** После финализации — список доставок из `output.json`: форматы
+  (CSV, JSON, XLSX, XML), архив, получатель (локальная папка, веб-хранилище,
+  почта, мессенджер), условие (успех, любой исход). Получатель — адаптер; сбой
+  доставки повторяется и пишется в события, но не меняет результат запуска.
+
 ## 7. Жизненный цикл run
 
 1. `RunService` делает снимок конфига и резервирует `run_id`.
@@ -403,8 +504,8 @@ class DefaultPipeline:
 4. Planner: каталог → `DISCOVER`/`LIST`; input → `DETAIL` по диапазонам
    immutable snapshot; `PROBE` для ворот.
 5. `Dispatcher` работает до исчерпания очереди или terminal-команды.
-6. Финализация **при любом исходе**: merge/export, summaries, уведомления,
-   retention, terminal-статус run и команд.
+6. Финализация **при любом исходе**: merge/export, summaries, terminal-статус
+   run и команд; затем доставки, уведомления и retention.
 
 Resume/retry/rebuild — новый run из задач и attempts исходного.
 
@@ -426,7 +527,7 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 | `proxy_check.json` | Network check и пороги ворот |
 | `scrapers.json` | Выбранные парсеры, aliases, подмножество прокси |
 | `workload.json` | Segments: link group × диапазоны list/detail; `proxy_id` — только affinity |
-| `output.json` | Форматы и путь итогового экспорта |
+| `output.json` | Доставки: форматы, архив, получатель, условие |
 | `storage.json` | Retention |
 
 `scraper.json` v3 — [0008](decisions/0008-scraper-json-v3.md), пакет парсера —
@@ -464,9 +565,10 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 
 ## 9. CLI
 
-Одна точка входа `dailyscraper` (`[project.scripts]`) с подкомандами `run`,
-`status`, `stop`, `resume`, `retry`, `rebuild`, `storage`. CLI только вызывает
-сервисы `app/` — это условие для будущего HTTP API.
+Одна точка входа `dailyscraper` (`[project.scripts]`; `run` и `runs` — с этапа 3) с подкомандами `run`,
+`status`, `runs` (история и результаты запусков), `stop`, `resume`, `retry`,
+`rebuild`, `storage`. CLI только вызывает сервисы `app/` — это условие для
+HTTP API и веб-интерфейса, которые подключаются отдельно ([0015](decisions/0015-open-core-resources-and-runs.md)).
 
 ## 10. Итоговые свойства параллельности
 
@@ -482,6 +584,10 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 | Писатели SQLite | родитель + каждый воркер | только родитель |
 | Preflight | барьер для всех парсеров | ворота на парсер |
 | Лимит браузеров | из запроса | настройка хоста |
+| Лимит одновременности парсера | число процессов | `max_parallel` парсера |
+| Хранилище | SQLite и файлы, SQL по всему коду | интерфейсы; SQLite и ФС — первые реализации, PostgreSQL / Redis / S3 — адаптеры |
+| Машин | одна | одна; фундамент готов к нескольким |
+| Запуск браузера при нехватке памяти | да | нет: слот ждёт бюджета памяти |
 
 ## 11. Перенос из MVP по компонентам
 
@@ -519,21 +625,38 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 | 0 | **Каркас.** `roadmaps/`, `pyproject.toml` (uv, ruff, pytest), пакеты слоёв, тест правила зависимостей, `settings/environment.py`, изоляция тестовой сессии, fault injection, `tests/harness` (process, CONNECT-прокси, workspace артефактов), fixtures controlled site, `tools/test_suite.py` | `uv run pytest` и `uv run ruff check` зелёные; controlled site отвечает в opt-in тесте `network` |
 | 1 | **Домен и схема.** `domain/`, `schema/` (scraper.json v3, runtime, workload), `settings/` (загрузка `config/<env>`, снимок), модели страниц с `CompiledTemplate`, selector alternatives, `ErrorCategory`/`PageOutcome`; конвертер `tools/convert_scraper.py` | Контролируемые пакеты загружаются; тесты вычисления общего XPath проходят; конвертер переводит контролируемые пакеты из предыдущего формата |
 | 2 | **Страницы в одном процессе.** `transport/` (Playwright, ElementFinder), `detection/`, Navigator, page-scrapers List/Detail/Auth с алгоритмами MVP, DefaultPipeline, ItemSink в файл; CLI без очереди: один парсер, один браузер, без прокси | Controlled site: каталог 3 страницы = 9/9/1, 19 товаров; detail из `controlled_details_v1.csv` совпадает с `controlled_details_v1.json` |
-| 3 | **Хранилище и выход.** Store + `tasks`/`attempts`, data_path, partitions + checkpoints, merge/export, финализация при любом исходе | Контракты output и финализации из MVP проходят |
-| 4 | **Параллельность.** TaskQueue, BrowserManager (слоты, pipe, watchdog, kill одного слота, leases хоста), Dispatcher, stop/cancel/kill | Перенесены и проходят acceptance: browser close, worker crash, interrupt, parent loss, multi run; убийство слота не трогает соседей |
-| 5 | **Прокси.** Sources, PoolSnapshot, `ProxyId`, Allocator, health на хост, профили, MV3, резидентские сессии | Тесты прокси и health store проходят; соседний run видит открытый circuit; acceptance с CONNECT-прокси (407 → другая прокси) |
+| 3 | **Хранилище и выход.** Интерфейсы хранилища и SQLite-адаптер (run и история запусков, команды, события с версией схемы, `project_id`), хранилище артефактов на локальной ФС, data_path, partitions + checkpoints, `item_key`, версия пакета (хэш) в попытке, merge/export, доставка в локальную папку и архив, финализация при любом исходе | Контракты output и финализации из MVP проходят; контрактные тесты бэкендов проходят на SQLite |
+| 4 | **Параллельность.** TaskQueue и таблицы `tasks`/`attempts`, BrowserManager (слоты, pipe, watchdog, kill одного слота, leases хоста), Dispatcher, stop/cancel/kill; протокол слота — версионируемые JSON-модели, пакетные отметки, идемпотентность, `host_id`; `max_parallel` парсера; снимки страниц при ошибках | Перенесены и проходят acceptance: browser close, worker crash, interrupt, parent loss, multi run; убийство слота не трогает соседей |
+| 4a | **HTTP-транспорт.** Интерфейсы страницы, поиска элементов и пробы; Playwright — одна реализация, HTTP — вторая; HTTP-слот с дорожками; `"transport"` в `scraper.json`, отказ при загрузке для возможностей, которых у HTTP нет ([0012](decisions/0012-transports-isolation-and-sync-core.md), [0013](decisions/0013-scaling-and-replaceable-backends.md)) | Контролируемые пакеты проходят и через браузер, и через HTTP с одинаковым результатом; `transport/` — единственное место, где импортируется Playwright; нагрузочный тест на 100 дорожек проходит, замер на 1000 записан |
+| 4b | **Ручное решение капч и уведомления.** Ручное вмешательство из MVP в точке `StateWaiter`, состояние слота «ждёт вмешательства», уведомления через адаптеры (почта, Telegram) о капче и об итогах запуска ([0014](decisions/0014-captcha-solvers-and-ai-observer.md)) | На controlled site капча ждёт ручного решения, уведомление уходит в тестовый получатель, после решения задача продолжается; по таймауту — категория `captcha` |
+| 5 | **Прокси.** Sources, PoolSnapshot, `ProxyId`, Allocator, health на хост, профили, MV3, резидентские сессии; режимы изоляции `persistent` и `ephemeral` (проверка встроенной авторизации прокси); блокировка ресурсов, бюджет памяти для слотов | Тесты прокси и health store проходят; соседний run видит открытый circuit; acceptance с CONNECT-прокси (407 → другая прокси) |
 | 6 | **Ворота, discovery, probe.** `PROBE`/`DISCOVER`, ворота на парсер, пороги run | Парсер A работает, пока B на probe; planning stop и discovery recovery проходят |
+| 6a | **Автоматическое решение капч.** `CaptchaSolver`, адаптер сервиса, решатель на ИИ-модели, цепочка на парсер перед ручным решением, учёт расходов ([0014](decisions/0014-captcha-solvers-and-ai-observer.md)) | Капча на controlled site решается через тестовый решатель; отказ решателя ведёт к ручному решению или категории `captcha` |
 | 7 | **Боевые парсеры.** Репозиторий парсеров, первые боевые пакеты (`catalog → detail`, API-режим, input-режим); парный прогон с MVP | Совпадение row_id/полей с MVP ≥ согласованного порога; многочасовой прогон без вмешательства |
-| 8 | **Паритет эксплуатации.** CLI целиком, уведомления, консоль, retention, документация | MVP можно отключить |
+| 8 | **Паритет эксплуатации.** CLI целиком (с историей запусков), async-фасад сервисов `app/`, получатели доставки (веб-хранилище, почта, мессенджеры), остальные уведомления, консоль, retention, Docker-образ и шаблон развёртывания, документация ([0015](decisions/0015-open-core-resources-and-runs.md)) | MVP можно отключить; 10–15 сайтов работают сутки в контейнере с 8 ГБ памяти и 2 ядрами |
+| 9 | **ИИ-наблюдатель.** Отдельный компонент: события и снимки → предложения изменений `scraper.json` → проверка (схема, повтор на снимках, контрольный прогон) → применение по политике с версией и откатом ([0014](decisions/0014-captcha-solvers-and-ai-observer.md)) | Намеренно сломанный селектор на controlled site обнаружен, исправление предложено, проверено и применено |
+| 10 | **Несколько машин.** Адаптеры PostgreSQL, Redis, S3; агент хоста; координатор отдельно от агентов ([0013](decisions/0013-scaling-and-replaceable-backends.md)) | Контрактные тесты бэкендов проходят на PostgreSQL и Redis; run на двух машинах; отключение машины возвращает её задачи в очередь |
 
-Этапы 2 и 3 можно вести параллельно; этап 5 зависит от 4.
+Этапы 2 и 3 можно вести параллельно; этапы 4a, 4b и 5 зависят от 4. Режим изоляции
+`shared` вводится после замеров памяти, не раньше этапа 5. Порядок этапов 9 и 10
+определяется потребностью; оба зависят от 8.
+
+Ближайшая цель — работающий сервис для одного владельца на одной машине: этапы
+3–7. HTTP API и веб-интерфейс — отдельный пакет после этапа 8.
 
 ## 13. Принятые решения
 
 | Вопрос | Решение |
 |---|---|
-| Sync или async | Синхронный Dispatcher, async внутри слотов при необходимости — [0002](decisions/0002-sync-dispatcher-and-process-slots.md) |
-| HTTP-транспорт, FastAPI | Отложены до этапа 8+ — [0002](decisions/0002-sync-dispatcher-and-process-slots.md) |
+| Sync или async | Синхронный Dispatcher и код страниц, одновременность — процессами; async-фасад для встраивания — [0002](decisions/0002-sync-dispatcher-and-process-slots.md), [0012](decisions/0012-transports-isolation-and-sync-core.md) |
+| HTTP-транспорт | Этап 4a, за общим интерфейсом транспорта — [0012](decisions/0012-transports-isolation-and-sync-core.md) |
+| Браузеры или контексты | Отдельный Chromium на `(site, proxy)` по умолчанию; режимы `ephemeral` и `shared` — [0012](decisions/0012-transports-isolation-and-sync-core.md) |
+| FastAPI | Отложен до этапа 8+ — [0002](decisions/0002-sync-dispatcher-and-process-slots.md) |
+| Нагрузка и несколько машин | Дорожки HTTP-слота, `max_parallel`, пакетные отметки; интерфейсы хранилища, PostgreSQL / Redis / S3 — адаптерами; координатор и агенты хостов — [0013](decisions/0013-scaling-and-replaceable-backends.md) |
+| Границы ядра | Открытая библиотека и CLI; HTTP API, веб-интерфейс, облачные надстройки — поверх `app/`, вне ядра; `project_id` как фундамент для клиентов — [0015](decisions/0015-open-core-resources-and-runs.md) |
+| Ресурсы | 10–15 сайтов на 8–16 ГБ и 2–4 ядрах; бюджет памяти для слотов, блокировка ресурсов по умолчанию — [0015](decisions/0015-open-core-resources-and-runs.md) |
+| Запуски и доставка | История запусков, `item_key`, версия пакета — хэш; доставки по настройкам через адаптеры получателей — [0015](decisions/0015-open-core-resources-and-runs.md) |
+| Капчи и ИИ-наблюдатель | `CaptchaSolver` в точке вмешательства; наблюдатель вне ядра, изменения — через проверяемые предложения — [0014](decisions/0014-captcha-solvers-and-ai-observer.md) |
 | Репозиторий и имена | Новый `dailyscraper`, чистые имена — [0001](decisions/0001-clean-repository-and-naming.md) |
 | Пакеты парсеров | Отдельный новый репозиторий, формат v3, одноразовый конвертер — [0003](decisions/0003-separate-scrapers-repository.md) |
 | Ветки | `dev` → `master` по завершении этапа — [0004](decisions/0004-branches-and-git-ownership.md) |

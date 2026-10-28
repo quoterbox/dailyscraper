@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +39,7 @@ class ListPageScraper:
         self.page = page
         self.templates = [compile_list_template(template) for template in page.templates]
         self._position = 0
+        self._on_page: Callable[[list[Item]], None] | None = None
 
     def start_url(self, link: str) -> str:
         pagination = self.page.pagination
@@ -45,9 +47,17 @@ class ListPageScraper:
             return link
         return pagination.url_template.format(url=link, page=pagination.start_page)
 
-    def run(self, link: str, first_outcome: PageOutcome) -> ListResult:
+    def run(
+        self,
+        link: str,
+        first_outcome: PageOutcome,
+        *,
+        on_page: Callable[[list[Item]], None] | None = None,
+    ) -> ListResult:
+        """``on_page`` receives each page's accepted items as soon as the page is read."""
         result = ListResult(last_outcome=first_outcome)
         self._position = 0
+        self._on_page = on_page
         if self.page.pagination.infinity_loading:
             self._run_infinite(link, first_outcome, result)
         else:
@@ -201,20 +211,26 @@ class ListPageScraper:
         )
 
     def _accept(self, page_items: list[Item], link: str, result: ListResult) -> bool:
+        accepted: list[Item] = []
+        complete = True
         for item in page_items:
             self._position += 1
             if self._position < self.page.start_item:
                 continue
             if self.page.last_item and self._position > self.page.last_item:
-                return False
+                complete = False
+                break
             prepared = self.ctx.actions.prepare_list_item(item, link)
             if prepared is None:
                 continue
             if self.page.save_start_link:
                 prepared["start_link"] = link
-            result.items.append(prepared)
+            accepted.append(prepared)
             self.ctx.pacer.delay(self.page.delays.between_items)
-        return True
+        result.items.extend(accepted)
+        if accepted and self._on_page is not None:
+            self._on_page(accepted)
+        return complete
 
     def _scroll_to(self, element: Element) -> None:
         scroll = self.page.scroll

@@ -5,11 +5,12 @@ import subprocess
 import sys
 
 SUITES = {
-    "fast": ["tests/unit", "tests/integration"],
+    "fast": ["tests/unit", "tests/contract", "tests/integration"],
     "network": ["tests/acceptance/controlled_site", "-m", "network"],
     "browser": ["tests/acceptance/controlled_site", "-m", "browser"],
     "full": [
         "tests/unit",
+        "tests/contract",
         "tests/integration",
         "tests/acceptance",
         "-m",

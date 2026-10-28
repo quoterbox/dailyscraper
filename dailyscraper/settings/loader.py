@@ -94,11 +94,16 @@ def _set_path(target: dict[str, Any], path: list[str], value: Any) -> None:
 
 
 def _resolve_paths(settings: Settings, root: Path) -> Settings:
-    resolved = {
-        name: (path if path.is_absolute() else root / path).resolve()
-        for name, path in settings.paths.model_dump().items()
-    }
-    return settings.model_copy(update={"paths": settings.paths.model_copy(update=resolved)})
+    def absolute(path: Path) -> Path:
+        return (path if path.is_absolute() else root / path).resolve()
+
+    paths = {name: absolute(path) for name, path in settings.paths.model_dump().items()}
+    storage = settings.storage
+    if storage.database is not None:
+        storage = storage.model_copy(update={"database": absolute(storage.database)})
+    return settings.model_copy(
+        update={"paths": settings.paths.model_copy(update=paths), "storage": storage}
+    )
 
 
 def _require_inside_workspace(settings: Settings, workspace: Path | None) -> None:
@@ -109,5 +114,7 @@ def _require_inside_workspace(settings: Settings, workspace: Path | None) -> Non
         for name in WORKSPACE_BOUND_PATHS
         if not getattr(settings.paths, name).is_relative_to(workspace)
     ]
+    if not settings.database_path.is_relative_to(workspace):
+        outside.append(f"storage.database={settings.database_path}")
     if outside:
         raise SettingsError(f"testing paths must be inside {workspace}: {', '.join(outside)}")

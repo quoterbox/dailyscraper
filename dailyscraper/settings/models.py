@@ -55,9 +55,48 @@ class BrowserSettings(SettingsModel):
     stealth: StealthSettings = StealthSettings()
 
 
+class StorageSettings(SettingsModel):
+    backend: Literal["sqlite"] = "sqlite"
+    database: Path | None = Field(None, description="Defaults to <paths.data>/dailyscraper.sqlite")
+    busy_timeout_ms: int = Field(30_000, gt=0)
+    batch_rows: int = Field(100, ge=1)
+    batch_seconds: float = Field(5.0, gt=0)
+    partition_max_rows: int = Field(100_000, ge=1)
+    partition_max_bytes: int = Field(128 * 1024 * 1024, ge=1)
+    fsync: bool = True
+
+
+OutputFormat = Literal["csv", "json", "xlsx", "xml"]
+
+
+class DeliverySettings(SettingsModel):
+    name: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    type: Literal["folder"]
+    path: str = Field(min_length=1, description="May contain {run_id}, {project}, {date}")
+    formats: tuple[OutputFormat, ...] | None = None
+    archive: bool = False
+    when: Literal["success", "always"] = Field(
+        "success", description="success: the run completed, possibly with failed items"
+    )
+    attempts: int = Field(3, ge=1)
+
+
+class OutputSettings(SettingsModel):
+    formats: tuple[OutputFormat, ...] = ("csv",)
+    archive: bool = False
+    deliveries: tuple[DeliverySettings, ...] = ()
+
+
 class Settings(SettingsModel):
     environment: str
     project_root: Path
+    project_id: str = Field("default", pattern=r"^[A-Za-z0-9_.-]+$")
     paths: PathsSettings
     browser: BrowserSettings = BrowserSettings()
+    storage: StorageSettings = StorageSettings()
+    output: OutputSettings = OutputSettings()
     scrapers: tuple[ScraperSelection, ...] = ()
+
+    @property
+    def database_path(self) -> Path:
+        return self.storage.database or self.paths.data / "dailyscraper.sqlite"
