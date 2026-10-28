@@ -24,16 +24,22 @@ from dailyscraper.domain import (
     AttemptStatus,
     BatchCommit,
     CommitRecord,
+    Dimension,
     ErrorCategory,
+    LeaseKey,
+    LimitRule,
     PartitionRef,
     Task,
     TaskKind,
     TaskOutcome,
     TaskStatus,
+    lease_keys,
 )
 from dailyscraper.output.merge import latest_attempt_commits
 from dailyscraper.schema import Inputs, load_scraper_package
+from dailyscraper.settings import Settings
 from dailyscraper.settings.models import RuntimeSettings
+from dailyscraper.storage.sqlite import SQLiteStore
 from dailyscraper.tasks.inputs import create_input_snapshot
 from dailyscraper.tasks.planner import PlanningError, plan_tasks
 from dailyscraper.tasks.retry import RetryPolicy, Verdict
@@ -205,38 +211,102 @@ def test_list_results_come_from_the_latest_attempt_with_rows() -> None:
     assert [c.commit_id for c in latest_attempt_commits(commits)] == ["b1", "a2", "legacy"]
 
 
-class FakeStore:
-    class leases:
-        @staticmethod
-        def acquire(*args, **kwargs):
-            return True
-
-
-def manager(memory_mb: float, **runtime) -> BrowserManager:
+def manager(store, memory_mb: float = 10_000, site: str = "a.ru", **runtime) -> BrowserManager:
+    settings = Settings(
+        environment="testing",
+        project_root=Path("."),
+        paths={"data": ".", "logs": ".", "scrapers": "."},
+        runtime=RuntimeSettings(**{"max_browsers_per_site_proxy": 10, **runtime}),
+        scrapers=[{"name": "fast", "max_parallel": 3}],
+    )
     return BrowserManager(
-        store=FakeStore(),
+        store=store,
         run_id="r",
         host_id="h",
-        runtime=RuntimeSettings(**runtime),
+        runtime=settings.runtime,
         configs=lambda scraper, slot: None,
+        rules=settings.limit_rules(),
+        sessions=lambda scraper: {Dimension.SITE: site},
         available_memory_mb=lambda: memory_mb,
     )
 
 
-def test_new_slots_need_the_memory_budget_but_the_first_one_always_starts() -> None:
-    small = manager(500, memory_reserve_mb=400, slot_memory_mb=300)
-    assert small.can_start("s", max_parallel=3)
-
-    small.slots["s-1"] = type("Slot", (), {"scraper": "s", "state": None})()
-    assert not small.can_start("s", max_parallel=3)
-    assert manager(5000, memory_reserve_mb=400, slot_memory_mb=300).can_start("s", 3)
+def hold(store, browsers: BrowserManager, scraper: str, holder: str) -> None:
+    assert (
+        store.leases.acquire(holder, browsers.lease_keys(scraper), run_id="r", ttl_seconds=60) == []
+    )
 
 
-def test_scraper_and_machine_limits() -> None:
-    limited = manager(10_000, max_slots=2)
-    limited.slots["a-1"] = type("Slot", (), {"scraper": "a", "state": None})()
+def test_new_slots_need_the_memory_budget_but_the_first_one_always_starts(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "s.sqlite")
+    small = manager(
+        store, 500, memory_reserve_mb=400, slot_memory_mb=300, max_parallel_per_scraper=3
+    )
+    assert small.can_start("s")
 
-    assert not limited.can_start("a", max_parallel=1)
-    assert limited.can_start("b", max_parallel=1)
-    limited.slots["b-1"] = type("Slot", (), {"scraper": "b", "state": None})()
-    assert not limited.can_start("c", max_parallel=1)
+    small.slots["s-1"] = object()
+    assert not small.can_start("s")
+    roomy = manager(
+        store, 5000, memory_reserve_mb=400, slot_memory_mb=300, max_parallel_per_scraper=3
+    )
+    roomy.slots["s-1"] = object()
+    assert roomy.can_start("s")
+
+
+def test_scraper_parallelism_with_override(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "s.sqlite")
+    browsers = manager(store)
+    hold(store, browsers, "slow", "slow-1")
+    assert not browsers.can_start("slow")
+
+    for number in (1, 2):
+        hold(store, browsers, "fast", f"fast-{number}")
+    assert browsers.can_start("fast")
+    hold(store, browsers, "fast", "fast-3")
+    assert not browsers.can_start("fast")
+
+
+def test_machine_limit_is_shared_by_all_scrapers_and_runs(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "s.sqlite")
+    browsers = manager(store, max_slots=2)
+    other_run = manager(store, max_slots=2)
+    other_run.run_id = "other"
+    hold(store, browsers, "a", "a-1")
+    hold(store, other_run, "b", "b-1")
+
+    assert not browsers.can_start("c")
+
+
+def test_site_and_proxy_limit_across_scrapers(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "s.sqlite")
+    rule = {"name": "site_proxy", "scope": ["site", "proxy"], "limit": 1}
+    browsers = manager(store, max_parallel_per_scraper=5, limits=[rule])
+    hold(store, browsers, "ozon_one", "one-1")
+
+    assert not browsers.can_start("ozon_two")
+    assert manager(store, site="wb.ru", max_parallel_per_scraper=5, limits=[rule]).can_start("wb")
+
+
+def test_rules_keys_and_most_specific_override() -> None:
+    rules = [
+        LimitRule("site_proxy", (Dimension.SITE, Dimension.PROXY), 1),
+        LimitRule("site_proxy", (Dimension.SITE, Dimension.PROXY), 4, {Dimension.SITE: "wb.ru"}),
+        LimitRule("host", (Dimension.HOST,), 10),
+    ]
+    session = {Dimension.SITE: "wb.ru", Dimension.PROXY: "p1", Dimension.HOST: "h"}
+
+    assert lease_keys(rules, session) == [
+        LeaseKey("site_proxy:site=wb.ru|proxy=p1", 4),
+        LeaseKey("host:host=h", 10),
+    ]
+    assert lease_keys(rules, {**session, Dimension.SITE: "ozon.ru"})[0].limit == 1
+
+
+def test_one_browser_per_site_and_proxy_by_default(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "s.sqlite")
+    browsers = manager(store, max_browsers_per_site_proxy=1, max_parallel_per_scraper=5)
+    hold(store, browsers, "ozon_one", "one-1")
+
+    assert not browsers.can_start("ozon_one")
+    assert not browsers.can_start("ozon_two")
+    assert manager(store, site="wb.ru", max_browsers_per_site_proxy=1).can_start("wb")

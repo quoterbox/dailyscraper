@@ -19,6 +19,7 @@ from dailyscraper.domain import (
     ErrorCategory,
     Event,
     EventLevel,
+    LeaseKey,
     PartitionRef,
     PartitionSeal,
     PartitionState,
@@ -547,30 +548,39 @@ class SQLiteLeases:
         self._clock = clock
 
     def acquire(
-        self, kind: str, holder: str, *, host_id: str, run_id: str, limit: int, ttl_seconds: float
-    ) -> bool:
-        def operation(c: sqlite3.Connection) -> bool:
+        self, holder: str, keys: Sequence[LeaseKey], *, run_id: str, ttl_seconds: float
+    ) -> list[str]:
+        def operation(c: sqlite3.Connection) -> list[str]:
             now = self._clock()
             c.execute("DELETE FROM leases WHERE expires_at <= ?", (now,))
-            if c.execute("SELECT 1 FROM leases WHERE holder = ?", (holder,)).fetchone():
-                c.execute(
-                    "UPDATE leases SET expires_at = ? WHERE holder = ?",
-                    (_after(now, ttl_seconds), holder),
-                )
-                return True
-            active = c.execute(
-                "SELECT COUNT(*) FROM leases WHERE kind = ? AND host_id = ?", (kind, host_id)
-            ).fetchone()[0]
-            if active >= limit:
-                return False
-            c.execute(
-                "INSERT INTO leases (holder, kind, host_id, run_id, expires_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (holder, kind, host_id, run_id, _after(now, ttl_seconds)),
+            full = [key.key for key in keys if _full(c, key, holder)]
+            if full:
+                return full
+            expires = _after(now, ttl_seconds)
+            c.executemany(
+                "INSERT INTO leases (holder, lease_key, run_id, expires_at) VALUES (?, ?, ?, ?)"
+                " ON CONFLICT (holder, lease_key) DO UPDATE SET expires_at = excluded.expires_at",
+                [(holder, key.key, run_id, expires) for key in keys],
             )
-            return True
+            return []
 
         return self._db.write(operation)
+
+    def blocked(self, keys: Sequence[LeaseKey]) -> list[str]:
+        now = self._clock()
+
+        def operation(c: sqlite3.Connection) -> list[str]:
+            return [
+                key.key
+                for key in keys
+                if c.execute(
+                    "SELECT COUNT(*) FROM leases WHERE lease_key = ? AND expires_at > ?",
+                    (key.key, now),
+                ).fetchone()[0]
+                >= key.limit
+            ]
+
+        return self._db.read(operation)
 
     def renew(self, holders: Sequence[str], *, ttl_seconds: float) -> None:
         if not holders:
@@ -586,14 +596,20 @@ class SQLiteLeases:
     def release(self, holder: str) -> None:
         self._db.write(lambda c: c.execute("DELETE FROM leases WHERE holder = ?", (holder,)))
 
-    def active(self, kind: str, *, host_id: str) -> int:
+    def count(self, key: str) -> int:
         now = self._clock()
         return self._db.read(
             lambda c: c.execute(
-                "SELECT COUNT(*) FROM leases WHERE kind = ? AND host_id = ? AND expires_at > ?",
-                (kind, host_id, now),
+                "SELECT COUNT(*) FROM leases WHERE lease_key = ? AND expires_at > ?", (key, now)
             ).fetchone()[0]
         )
+
+
+def _full(c: sqlite3.Connection, key: LeaseKey, holder: str) -> bool:
+    others = c.execute(
+        "SELECT COUNT(*) FROM leases WHERE lease_key = ? AND holder != ?", (key.key, holder)
+    ).fetchone()[0]
+    return others >= key.limit
 
 
 class SQLiteEvents:

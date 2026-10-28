@@ -11,6 +11,7 @@ from dailyscraper.domain import (
     CommitRecord,
     DeliveryRecord,
     Event,
+    LeaseKey,
     PartitionRef,
     PartitionSeal,
     PartitionState,
@@ -124,17 +125,27 @@ class CommandLog(Protocol):
 
 
 class LeaseRepository(Protocol):
-    """Host-wide resource limits shared by all runs on the machine."""
+    """Places in limited counters, shared by every run and machine using the store.
+
+    A holder (a slot) takes all its keys at once or none; an expired lease
+    frees its places without an explicit release.
+    """
 
     def acquire(
-        self, kind: str, holder: str, *, host_id: str, run_id: str, limit: int, ttl_seconds: float
-    ) -> bool: ...
+        self, holder: str, keys: Sequence[LeaseKey], *, run_id: str, ttl_seconds: float
+    ) -> list[str]:
+        """Take a place in every key; returns the keys that are full, nothing taken then."""
+        ...
+
+    def blocked(self, keys: Sequence[LeaseKey]) -> list[str]:
+        """Keys without a free place, without taking any."""
+        ...
 
     def renew(self, holders: Sequence[str], *, ttl_seconds: float) -> None: ...
 
     def release(self, holder: str) -> None: ...
 
-    def active(self, kind: str, *, host_id: str) -> int: ...
+    def count(self, key: str) -> int: ...
 
 
 class EventLog(Protocol):

@@ -16,6 +16,7 @@ from dailyscraper.domain.events import (
     Event,
     EventLevel,
 )
+from dailyscraper.domain.limits import DIRECT_PROXY, Dimension, LeaseKey, LimitRule, lease_keys
 from dailyscraper.domain.pages import PageOutcome, PageState, PageType
 from dailyscraper.domain.runs import DEFAULT_PROJECT_ID, RunRecord, RunStatus, new_run_id
 from dailyscraper.domain.tasks import (
@@ -32,6 +33,7 @@ from dailyscraper.domain.tasks import (
 
 __all__ = [
     "DEFAULT_PROJECT_ID",
+    "DIRECT_PROXY",
     "EVENT_SCHEMA_VERSION",
     "PARTITION_RECORD_VERSION",
     "Attempt",
@@ -42,9 +44,12 @@ __all__ = [
     "CommitRecord",
     "DeliveryRecord",
     "DeliveryStatus",
+    "Dimension",
     "ErrorCategory",
     "Event",
     "EventLevel",
+    "LeaseKey",
+    "LimitRule",
     "PageOutcome",
     "PageState",
     "PageType",
@@ -58,5 +63,6 @@ __all__ = [
     "TaskOutcome",
     "TaskSpec",
     "TaskStatus",
+    "lease_keys",
     "new_run_id",
 ]

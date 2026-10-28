@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -50,7 +50,7 @@ class Dispatcher:
         events: RunEvents,
         run_id: str,
         host_id: str,
-        max_parallel: Mapping[str, int],
+        scrapers: Sequence[str],
         retry: RetryPolicy,
         poll_interval: float = 0.5,
         stop_grace: float = 30.0,
@@ -61,7 +61,7 @@ class Dispatcher:
         self.events = events
         self.run_id = run_id
         self.host_id = host_id
-        self.max_parallel = dict(max_parallel)
+        self.scrapers = list(scrapers)
         self.retry = retry
         self.poll_interval = poll_interval
         self.stop_grace = stop_grace
@@ -118,8 +118,8 @@ class Dispatcher:
         while True:
             allowed = [
                 scraper
-                for scraper, limit in self.max_parallel.items()
-                if self.browsers.idle_slot(scraper) or self.browsers.can_start(scraper, limit)
+                for scraper in self.scrapers
+                if self.browsers.idle_slot(scraper) or self.browsers.can_start(scraper)
             ]
             task = self.store.tasks.claim(self.run_id, scrapers=allowed) if allowed else None
             if task is None:

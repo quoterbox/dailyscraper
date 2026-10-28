@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dailyscraper.domain.limits import Dimension, LimitRule
+
 
 class SettingsModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -23,10 +25,25 @@ class ScraperSelection(SettingsModel):
     max_parallel: int | None = Field(None, ge=1)
 
 
+LimitDimension = Literal["host", "site", "proxy", "scraper", "run", "project", "kind"]
+
+
+class LimitSettings(SettingsModel):
+    """A session limit over a combination of dimensions; see ``domain.limits.LimitRule``."""
+
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    scope: tuple[LimitDimension, ...] = Field(min_length=1)
+    limit: int = Field(ge=1)
+    match: dict[LimitDimension, str] = Field(default_factory=dict)
+
+
 class RuntimeSettings(SettingsModel):
     host_id: str | None = Field(None, description="Defaults to the machine's host name")
     max_slots: int = Field(4, ge=1, description="Browser slots of this machine for all runs")
     max_parallel_per_scraper: int = Field(1, ge=1)
+    max_browsers_per_site_proxy: int = Field(
+        1, ge=1, description="Browsers of one site through one proxy (or the direct connection)"
+    )
     slot_memory_mb: int = Field(400, ge=1)
     memory_reserve_mb: int = Field(1024, ge=0)
     items_per_task: int = Field(50, ge=1)
@@ -41,6 +58,7 @@ class RuntimeSettings(SettingsModel):
     lease_ttl_seconds: float = Field(60.0, gt=0)
     poll_interval_seconds: float = Field(0.5, gt=0)
     snapshots_per_slot: int = Field(20, ge=0)
+    limits: tuple[LimitSettings, ...] = ()
 
 
 class Viewport(SettingsModel):
@@ -119,11 +137,44 @@ class Settings(SettingsModel):
     runtime: RuntimeSettings = RuntimeSettings()
     scrapers: tuple[ScraperSelection, ...] = ()
 
-    def max_parallel(self, scraper: str) -> int:
-        selection = next((item for item in self.scrapers if item.name == scraper), None)
-        if selection is not None and selection.max_parallel is not None:
-            return selection.max_parallel
-        return self.runtime.max_parallel_per_scraper
+    def limit_rules(self) -> list[LimitRule]:
+        """Built-in limits from ``max_slots``, ``max_parallel`` and
+        ``max_browsers_per_site_proxy``, then ``runtime.limits``."""
+        runtime = self.runtime
+        rules = [
+            LimitRule(
+                "host_browsers",
+                (Dimension.HOST, Dimension.KIND),
+                runtime.max_slots,
+                {Dimension.KIND: "browser"},
+            ),
+            LimitRule("scraper_parallel", (Dimension.SCRAPER,), runtime.max_parallel_per_scraper),
+            LimitRule(
+                "site_proxy",
+                (Dimension.SITE, Dimension.PROXY),
+                runtime.max_browsers_per_site_proxy,
+            ),
+        ]
+        rules += [
+            LimitRule(
+                "scraper_parallel",
+                (Dimension.SCRAPER,),
+                selection.max_parallel,
+                {Dimension.SCRAPER: selection.name},
+            )
+            for selection in self.scrapers
+            if selection.max_parallel is not None
+        ]
+        rules += [
+            LimitRule(
+                limit.name,
+                tuple(Dimension(name) for name in limit.scope),
+                limit.limit,
+                {Dimension(name): value for name, value in limit.match.items()},
+            )
+            for limit in runtime.limits
+        ]
+        return rules
 
     @property
     def database_path(self) -> Path:

@@ -292,6 +292,13 @@ class ProxyHealth(Protocol):  # общий для хоста: SQLite + TTL
 
 - Источники `static` / `gateway` / `api` из MVP, со стабильным `ProxyId` (не
   позиционный `api_{index}`) и явной солью сессии вместо переменной окружения.
+- **Связка (сайт, прокси).** Лимит браузеров на одну прокси для одного сайта —
+  правило лимита `scope: [site, proxy]` ([0016](decisions/0016-session-limits.md)). `site_key` — домен из `website` пакета, общий
+  для всех парсеров этого сайта; прямое подключение без прокси — прокси `direct`.
+  Lease связки общий для всех запусков и машин (одна прокси — один внешний IP).
+  В режиме `persistent` лимит всегда 1: профиль `(site, ProxyId)` может открыть
+  только один браузер. Итоговая параллельность сайта — меньшее из `max_parallel`
+  и «доступные прокси × лимит связки».
 - `Allocator` — единственное место выбора прокси. Политика: health (healthy >
   unknown > degraded > half-open) → наименьшая недавняя нагрузка → `avoid`
   из прошлых attempts.
@@ -330,7 +337,7 @@ class BrowserManager(Protocol):
 - Watchdog — по событиям `Progress` из pipe.
 - Новый браузерный слот запускается только при наличии бюджета памяти машины;
   иначе задача ждёт ([0015](decisions/0015-open-core-resources-and-runs.md)).
-- Leases хоста (браузеры всего, site+proxy, профиль) берутся на время жизни
+- Лимиты — правила над измерениями `host`/`site`/`proxy`/`scraper`/`run`/`project`/`kind` ([0016](decisions/0016-session-limits.md)); места в них — leases, общие для запусков и машин, берутся на время жизни
   слота. Лимиты — настройка хоста в SQLite, а не значения из запроса.
 - Слот не открывает хранилище и не читает конфиг с диска; точка входа —
   `browsers/slot_main.py`.
@@ -528,7 +535,7 @@ Resume/retry/rebuild — новый run из задач и attempts исходн
 | `paths.json` | Каталоги данных, логов, профилей, runtime |
 | `logger.json` | Логирование |
 | `browser.json` | Playwright, профили, proxy-auth, stealth, блокировка ресурсов |
-| `runtime.json` | Dispatch (fairness, лимиты слотов), retry, health, watchdog, команды |
+| `runtime.json` | Слоты и тайм-ауты, retry, watchdog, правила лимитов `limits` ([0016](decisions/0016-session-limits.md)) |
 | `proxies.json` | Схема v2 MVP (static/gateway/api) + `id_strategy`, `gateway.session_rotation` |
 | `proxy_check.json` | Network check и пороги ворот |
 | `scrapers.json` | Выбранные парсеры, aliases, подмножество прокси |
@@ -635,7 +642,7 @@ HTTP API и веб-интерфейса, которые подключаются
 | 4 | **Параллельность.** TaskQueue и таблицы `tasks`/`attempts`, BrowserManager (слоты, pipe, watchdog, kill одного слота, leases хоста), Dispatcher, stop/cancel/kill; протокол слота — версионируемые JSON-модели, пакетные отметки, идемпотентность, `host_id`; `max_parallel` парсера; снимки страниц при ошибках | Перенесены и проходят acceptance: browser close, worker crash, interrupt, parent loss, multi run; убийство слота не трогает соседей |
 | 4a | **HTTP-транспорт.** Интерфейсы страницы, поиска элементов и пробы; Playwright — одна реализация, HTTP — вторая; HTTP-слот с дорожками; `"transport"` в `scraper.json`, отказ при загрузке для возможностей, которых у HTTP нет ([0012](decisions/0012-transports-isolation-and-sync-core.md), [0013](decisions/0013-scaling-and-replaceable-backends.md)) | Контролируемые пакеты проходят и через браузер, и через HTTP с одинаковым результатом; `transport/` — единственное место, где импортируется Playwright; нагрузочный тест на 100 дорожек проходит, замер на 1000 записан |
 | 4b | **Ручное решение капч и уведомления.** Ручное вмешательство из MVP в точке `StateWaiter`, состояние слота «ждёт вмешательства», уведомления через адаптеры (почта, Telegram) о капче и об итогах запуска ([0014](decisions/0014-captcha-solvers-and-ai-observer.md)) | На controlled site капча ждёт ручного решения, уведомление уходит в тестовый получатель, после решения задача продолжается; по таймауту — категория `captcha` |
-| 5 | **Прокси.** Sources, PoolSnapshot, `ProxyId`, Allocator, health на хост, профили, MV3, резидентские сессии; режимы изоляции `persistent` и `ephemeral` (проверка встроенной авторизации прокси); блокировка ресурсов, бюджет памяти для слотов | Тесты прокси и health store проходят; соседний run видит открытый circuit; acceptance с CONNECT-прокси (407 → другая прокси) |
+| 5 | **Прокси.** Sources, PoolSnapshot, `ProxyId`, Allocator, health на хост, профили, MV3, резидентские сессии; выбор прокси с учётом лимитов связки (сайт, прокси), правило профиля для `persistent`; режимы изоляции `persistent` и `ephemeral` (проверка встроенной авторизации прокси); блокировка ресурсов, бюджет памяти для слотов | Тесты прокси и health store проходят; соседний run видит открытый circuit; acceptance с CONNECT-прокси (407 → другая прокси) |
 | 6 | **Ворота, discovery, probe.** `PROBE`/`DISCOVER`, ворота на парсер, пороги run | Парсер A работает, пока B на probe; planning stop и discovery recovery проходят |
 | 6a | **Автоматическое решение капч.** `CaptchaSolver`, адаптер сервиса, решатель на ИИ-модели, цепочка на парсер перед ручным решением, учёт расходов ([0014](decisions/0014-captcha-solvers-and-ai-observer.md)) | Капча на controlled site решается через тестовый решатель; отказ решателя ведёт к ручному решению или категории `captcha` |
 | 7 | **Боевые парсеры.** Репозиторий парсеров, первые боевые пакеты (`catalog → detail`, API-режим, input-режим); парный прогон с MVP | Совпадение row_id/полей с MVP ≥ согласованного порога; многочасовой прогон без вмешательства |
@@ -662,6 +669,7 @@ HTTP API и веб-интерфейса, которые подключаются
 | Границы ядра | Открытая библиотека и CLI; HTTP API, веб-интерфейс, облачные надстройки — поверх `app/`, вне ядра; `project_id` как фундамент для клиентов — [0015](decisions/0015-open-core-resources-and-runs.md) |
 | Ресурсы | 10–15 сайтов на 8–16 ГБ и 2–4 ядрах; бюджет памяти для слотов, блокировка ресурсов по умолчанию — [0015](decisions/0015-open-core-resources-and-runs.md) |
 | Запуски и доставка | История запусков, `item_key`, версия пакета — хэш; доставки по настройкам через адаптеры получателей — [0015](decisions/0015-open-core-resources-and-runs.md) |
+| Лимиты сессий | Правила над измерениями сессии, переопределения по имени, leases в общем хранилище — [0016](decisions/0016-session-limits.md) |
 | Капчи и ИИ-наблюдатель | `CaptchaSolver` в точке вмешательства; наблюдатель вне ядра, изменения — через проверяемые предложения — [0014](decisions/0014-captcha-solvers-and-ai-observer.md) |
 | Репозиторий и имена | Новый `dailyscraper`, чистые имена — [0001](decisions/0001-clean-repository-and-naming.md) |
 | Пакеты парсеров | Отдельный новый репозиторий, формат v3, одноразовый конвертер — [0003](decisions/0003-separate-scrapers-repository.md) |

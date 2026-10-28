@@ -157,13 +157,13 @@ CREATE TABLE commands (
 CREATE INDEX commands_pending ON commands(run_id, applied_at);
 
 CREATE TABLE leases (
-    holder TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    host_id TEXT NOT NULL,
+    holder TEXT NOT NULL,
+    lease_key TEXT NOT NULL,
     run_id TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (holder, lease_key)
 );
-CREATE INDEX leases_by_kind ON leases(kind, host_id, expires_at);
+CREATE INDEX leases_by_key ON leases(lease_key, expires_at);
 """
 
 MIGRATIONS: tuple[Migration, ...] = (

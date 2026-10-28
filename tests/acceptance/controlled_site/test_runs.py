@@ -85,7 +85,9 @@ def test_detail_rows_run_in_parallel_browsers(
     parallel = settings.model_copy(
         update={
             "scrapers": (ScraperSelection(name="controlled_details", max_parallel=2),),
-            "runtime": settings.runtime.model_copy(update={"items_per_task": 1}),
+            "runtime": settings.runtime.model_copy(
+                update={"items_per_task": 1, "max_browsers_per_site_proxy": 2}
+            ),
         }
     )
 

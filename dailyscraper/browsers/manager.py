@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from multiprocessing.connection import Connection, wait
@@ -25,13 +25,22 @@ from dailyscraper.browsers.messages import (
 )
 from dailyscraper.browsers.slot import SlotConfig, slot_main
 from dailyscraper.browsers.termination import terminate_tree
-from dailyscraper.domain import Attempt, ErrorCategory, Task
+from dailyscraper.domain import (
+    DIRECT_PROXY,
+    Attempt,
+    Dimension,
+    ErrorCategory,
+    LeaseKey,
+    LimitRule,
+    Task,
+    lease_keys,
+)
 from dailyscraper.settings.models import RuntimeSettings
 from dailyscraper.storage import Store
 
 logger = logging.getLogger(__name__)
 
-SLOT_LEASE = "browser_slot"
+BROWSER_KIND = "browser"
 MB = 1024 * 1024
 
 
@@ -80,9 +89,11 @@ SlotEvent = SlotMessage | SlotExited
 class BrowserManager:
     """Slot processes of one run on this machine.
 
-    A slot is started only within the machine's lease limit, the scraper's
-    parallelism and the free memory budget. The watchdog kills a slot that
-    stops reporting or overruns the task deadline; only that slot is affected.
+    A slot starts only when it gets a place in every limit that applies to its
+    session (``rules`` over host, site, proxy, scraper… shared by all runs and
+    machines on the store) and the machine has the memory budget. The watchdog
+    kills a slot that stops reporting or overruns the task deadline; only that
+    slot is affected.
     """
 
     store: Store
@@ -90,6 +101,8 @@ class BrowserManager:
     host_id: str
     runtime: RuntimeSettings
     configs: Callable[[str, str], SlotConfig]
+    rules: Sequence[LimitRule] = ()
+    sessions: Callable[[str], Mapping[Dimension, str]] = lambda scraper: {}
     clock: Callable[[], float] = time.monotonic
     available_memory_mb: Callable[[], float] = lambda: psutil.virtual_memory().available / MB
     terminate: Callable[[int], object] = terminate_tree
@@ -103,9 +116,19 @@ class BrowserManager:
     def idle_slot(self, scraper: str) -> SlotHandle | None:
         return next((slot for slot in self.slots_of(scraper) if slot.state is SlotState.IDLE), None)
 
-    def can_start(self, scraper: str, max_parallel: int) -> bool:
-        active = [slot for slot in self.slots_of(scraper) if slot.state is not SlotState.STOPPING]
-        if len(active) >= max_parallel or len(self.slots) >= self.runtime.max_slots:
+    def lease_keys(self, scraper: str) -> list[LeaseKey]:
+        session = {
+            Dimension.HOST: self.host_id,
+            Dimension.RUN: self.run_id,
+            Dimension.KIND: BROWSER_KIND,
+            Dimension.PROXY: DIRECT_PROXY,
+            Dimension.SCRAPER: scraper,
+            **self.sessions(scraper),
+        }
+        return lease_keys(self.rules, session)
+
+    def can_start(self, scraper: str) -> bool:
+        if self.store.leases.blocked(self.lease_keys(scraper)):
             return False
         if not self.slots:
             return True
@@ -120,15 +143,14 @@ class BrowserManager:
         self._numbers[scraper] = number
         slot_id = f"{scraper}-{number}"
         holder = f"{self.run_id}/{slot_id}"
-        if not self.store.leases.acquire(
-            SLOT_LEASE,
+        full = self.store.leases.acquire(
             holder,
-            host_id=self.host_id,
+            self.lease_keys(scraper),
             run_id=self.run_id,
-            limit=self.runtime.max_slots,
             ttl_seconds=self.runtime.lease_ttl_seconds,
-        ):
-            logger.info("No free browser slot on %s for %s", self.host_id, scraper)
+        )
+        if full:
+            logger.info("Not starting a slot for %s, limits reached: %s", scraper, ", ".join(full))
             return None
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe()

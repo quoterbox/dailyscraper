@@ -16,6 +16,7 @@ from dailyscraper.domain import (
     ErrorCategory,
     Event,
     EventLevel,
+    LeaseKey,
     PartitionRef,
     PartitionSeal,
     RunRecord,
@@ -384,24 +385,47 @@ def test_commands_are_pending_until_applied(store: Store) -> None:
     assert store.commands.pending("r1") == []
 
 
-def test_leases_limit_holders_per_host(store: Store) -> None:
-    def acquire(holder, host="h1", ttl=60.0):
-        return store.leases.acquire(
-            "browser", holder, host_id=host, run_id="r1", limit=2, ttl_seconds=ttl
-        )
+HOST = LeaseKey("host:host=h1", 2)
+SITE_PROXY = LeaseKey("site_proxy:site=a.ru|proxy=p1", 1)
 
-    assert acquire("s1") and acquire("s2")
-    assert not acquire("s3")
-    assert acquire("s1")
-    assert acquire("s3", host="h2")
-    assert store.leases.active("browser", host_id="h1") == 2
+
+def acquire(store: Store, holder: str, *keys: LeaseKey, ttl: float = 60.0) -> list[str]:
+    return store.leases.acquire(holder, keys, run_id="r1", ttl_seconds=ttl)
+
+
+def test_leases_limit_holders_per_key(store: Store) -> None:
+    assert acquire(store, "s1", HOST) == [] and acquire(store, "s2", HOST) == []
+
+    assert acquire(store, "s3", HOST) == [HOST.key]
+    assert acquire(store, "s1", HOST) == []
+    assert store.leases.count(HOST.key) == 2
+    assert store.leases.blocked([HOST]) == [HOST.key]
 
     store.leases.release("s1")
-    assert acquire("s3")
+    assert store.leases.blocked([HOST]) == []
+    assert acquire(store, "s3", HOST) == []
+
+
+def test_all_keys_are_taken_or_none(store: Store) -> None:
+    assert acquire(store, "s1", SITE_PROXY) == []
+
+    assert acquire(store, "s2", HOST, SITE_PROXY) == [SITE_PROXY.key]
+    assert store.leases.count(HOST.key) == 0
+
+    other_proxy = LeaseKey("site_proxy:site=a.ru|proxy=p2", 1)
+    assert acquire(store, "s2", HOST, other_proxy) == []
+    assert store.leases.count(HOST.key) == 1
 
 
 def test_expired_leases_free_their_place(store: Store) -> None:
-    assert store.leases.acquire("browser", "s1", host_id="h", run_id="r1", limit=1, ttl_seconds=-1)
+    assert acquire(store, "s1", SITE_PROXY, ttl=-1) == []
 
-    assert store.leases.active("browser", host_id="h") == 0
-    assert store.leases.acquire("browser", "s2", host_id="h", run_id="r1", limit=1, ttl_seconds=60)
+    assert store.leases.count(SITE_PROXY.key) == 0
+    assert acquire(store, "s2", SITE_PROXY) == []
+
+
+def test_renewed_leases_stay(store: Store) -> None:
+    acquire(store, "s1", SITE_PROXY, ttl=-1)
+    store.leases.renew(["s1"], ttl_seconds=60)
+
+    assert acquire(store, "s2", SITE_PROXY) == [SITE_PROXY.key]

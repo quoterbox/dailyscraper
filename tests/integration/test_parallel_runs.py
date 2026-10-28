@@ -16,6 +16,7 @@ from dailyscraper.output import iter_csv
 from dailyscraper.settings import load_settings
 from dailyscraper.settings.models import (
     DeliverySettings,
+    LimitSettings,
     OutputSettings,
     RuntimeSettings,
     ScraperSelection,
@@ -42,6 +43,7 @@ def settings(project_root: Path, scenario_workspace: Path):
             "output": OutputSettings(formats=("csv",)),
             "runtime": RuntimeSettings(
                 max_slots=4,
+                max_browsers_per_site_proxy=10,
                 memory_reserve_mb=0,
                 slot_memory_mb=1,
                 items_per_task=2,
@@ -297,3 +299,21 @@ def test_missing_products_do_not_spoil_the_run(
     assert [e.level.value for e in store.events.list(report.run.run_id, types=["item.failed"])] == [
         "info"
     ]
+
+
+def test_site_and_proxy_limit_caps_slots(settings, store, project_root, scenario_workspace) -> None:
+    name = make_package(settings, project_root, "details", "detail", {})
+    rule = {"name": "site_proxy", "scope": ["site", "proxy"], "limit": 1}
+    settings = settings.model_copy(
+        update={
+            "scrapers": (ScraperSelection(name=name, max_parallel=3),),
+            "runtime": settings.runtime.model_copy(
+                update={"limits": (LimitSettings.model_validate(rule),)}
+            ),
+        }
+    )
+
+    report = run(settings, store, name, input_path=make_input(scenario_workspace / "in.csv", 6))
+
+    assert report.run.status is RunStatus.COMPLETED
+    assert report.run.summary["slots"] == 1

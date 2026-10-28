@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import psutil
 
@@ -21,6 +22,7 @@ from dailyscraper.domain import (
     Command,
     CommandKind,
     DeliveryRecord,
+    Dimension,
     EventLevel,
     RunRecord,
     RunStatus,
@@ -210,11 +212,16 @@ class RunService:
                 host_id=self.host_id,
                 runtime=runtime,
                 configs=slot_config,
+                rules=self.settings.limit_rules(),
+                sessions=lambda scraper: {
+                    Dimension.SITE: site_key(packages[scraper]),
+                    Dimension.PROJECT: self.settings.project_id,
+                },
             ),
             events=events,
             run_id=run_id,
             host_id=self.host_id,
-            max_parallel={name: self.settings.max_parallel(name) for name in packages},
+            scrapers=list(packages),
             retry=RetryPolicy(runtime.retry_delay_seconds, runtime.retry_max_delay_seconds),
             poll_interval=runtime.poll_interval_seconds,
             stop_grace=runtime.stop_grace_seconds,
@@ -441,6 +448,12 @@ class RunService:
             return dict(Counter(self.store.partitions.item_statuses(run_id, name).values()))
         records = scraper_records(self.store.partitions, layout, run_id, name)
         return dict(Counter(record.get("status") or "ok" for record in records))
+
+
+def site_key(package: ScraperPackage) -> str:
+    """The site a package works on, shared by every package with the same domain."""
+    host = (urlsplit(package.definition.website).hostname or package.name).lower()
+    return host.removeprefix("www.")
 
 
 def _final_attempts(attempts: list[Attempt]) -> dict[str, Attempt]:
