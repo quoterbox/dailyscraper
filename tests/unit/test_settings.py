@@ -114,7 +114,7 @@ def test_env_file_supplies_references_and_process_environment_wins(
             {"paths.json": {"paths": {**WORKSPACE_PATHS["paths"], "data": "${env:NOT_SET_X}"}}},
             "NOT_SET_X",
         ),
-        ({"paths.json": {**WORKSPACE_PATHS, "browser": {}}}, "Extra inputs"),
+        ({"paths.json": {**WORKSPACE_PATHS, "unknown_section": {}}}, "Extra inputs"),
         ({"paths.json": {"paths": {**WORKSPACE_PATHS["paths"], "data": "data"}}}, "must be inside"),
     ],
 )

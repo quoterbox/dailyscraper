@@ -4,6 +4,9 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from dailyscraper.settings.interpolation import MissingVariableError, interpolate_env
+from dailyscraper.settings.sources import CONFIG_DIRECTORY, read_config_directory, read_env_file
+
 ENVIRONMENT_VARIABLE = "DAILYSCRAPER_ENV"
 DEVELOPMENT_ENVIRONMENT = "development"
 TESTING_ENVIRONMENT = "testing"
@@ -12,13 +15,6 @@ TEST_ENV_FILE = ".test.env"
 TEST_WORKSPACE_VARIABLE = "DAILYSCRAPER_TEST_WORKSPACE"
 TEST_CONFIG_ROOT_VARIABLE = "DAILYSCRAPER_TEST_CONFIG_ROOT"
 TEST_SESSION_ID_VARIABLE = "DAILYSCRAPER_TEST_SESSION_ID"
-
-PROTECTED_DEVELOPMENT_PATHS = (
-    Path("config") / DEVELOPMENT_ENVIRONMENT,
-    Path("data"),
-    Path("logs"),
-    Path("scrapers"),
-)
 
 
 @dataclass(frozen=True)
@@ -78,8 +74,8 @@ def validate_testing_workspace(workspace: Path, *, project_root: Path) -> Path:
         raise RuntimeError("Testing workspace cannot be a filesystem root.")
     if resolved_workspace == resolved_project:
         raise RuntimeError("Testing workspace cannot be the project root.")
-    for protected in PROTECTED_DEVELOPMENT_PATHS:
-        if resolved_workspace.is_relative_to((resolved_project / protected).resolve()):
+    for protected in development_paths(resolved_project):
+        if resolved_workspace.is_relative_to(protected):
             raise RuntimeError(
                 f"Testing workspace overlaps a protected development path: {resolved_workspace}"
             )
@@ -93,7 +89,7 @@ def validate_testing_config_root(
     workspace: Path,
 ) -> Path:
     resolved = Path(config_root).expanduser().resolve()
-    development_root = (Path(project_root) / "config" / DEVELOPMENT_ENVIRONMENT).resolve()
+    development_root = (Path(project_root) / CONFIG_DIRECTORY / DEVELOPMENT_ENVIRONMENT).resolve()
     if resolved.is_relative_to(development_root):
         raise RuntimeError(f"Testing config root cannot use config/development: {resolved}")
     if not resolved.is_relative_to(Path(workspace).resolve()):
@@ -101,3 +97,21 @@ def validate_testing_config_root(
             f"Testing config overrides must be inside {TEST_WORKSPACE_VARIABLE}: {resolved}"
         )
     return resolved
+
+
+def development_paths(project_root: Path) -> tuple[Path, ...]:
+    root = Path(project_root).resolve()
+    config = root / CONFIG_DIRECTORY / DEVELOPMENT_ENVIRONMENT
+    configured = read_config_directory(config).get("paths")
+    if not isinstance(configured, dict):
+        configured = {}
+    variables = {**read_env_file(root / DEVELOPMENT_ENV_FILE), **os.environ}
+    try:
+        configured = interpolate_env(configured, variables)
+    except MissingVariableError as error:
+        raise RuntimeError(f"Cannot resolve development paths: {error.args[0]}") from error
+    paths = [Path(value).expanduser() for value in configured.values() if isinstance(value, str)]
+    return (
+        config.resolve(),
+        *((path if path.is_absolute() else root / path).resolve() for path in paths),
+    )

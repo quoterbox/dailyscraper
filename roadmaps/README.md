@@ -48,3 +48,4 @@
 | [0008](decisions/0008-scraper-json-v3.md) | Формат `scraper.json` v3 | принято |
 | [0009](decisions/0009-scraper-actions-hooks.md) | Hooks `ScraperActions` | принято |
 | [0010](decisions/0010-settings-loading.md) | Загрузка настроек без Dynaconf | принято |
+| [0011](decisions/0011-page-execution-contract.md) | Контракт исполнения страниц | принято |

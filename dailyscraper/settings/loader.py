@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from dotenv import dotenv_values
 from pydantic import ValidationError
 
 from dailyscraper.settings.environment import (
@@ -16,23 +15,20 @@ from dailyscraper.settings.environment import (
 )
 from dailyscraper.settings.interpolation import MissingVariableError, interpolate_env
 from dailyscraper.settings.models import Settings
+from dailyscraper.settings.sources import (
+    CONFIG_DIRECTORY,
+    SettingsError,
+    deep_merge,
+    read_config_directory,
+    read_env_file,
+)
 
 OVERRIDE_PREFIX = "DAILYSCRAPER__"
-LOCAL_SUFFIX = ".local.json"
 WORKSPACE_BOUND_PATHS = ("data", "logs")
 
 
-class SettingsError(ValueError):
-    pass
-
-
 def load_variables(environment: EnvironmentPaths) -> dict[str, str]:
-    file_values = {
-        name: value
-        for name, value in dotenv_values(environment.env_file).items()
-        if value is not None
-    }
-    return {**file_values, **os.environ}
+    return {**read_env_file(environment.env_file), **os.environ}
 
 
 def load_settings(project_root: Path) -> Settings:
@@ -42,8 +38,7 @@ def load_settings(project_root: Path) -> Settings:
 
     raw: dict[str, Any] = {}
     for directory in _config_directories(root, environment):
-        for path in _config_files(directory):
-            _deep_merge(raw, _read_json(path))
+        deep_merge(raw, read_config_directory(directory))
     for path, value in _overrides(os.environ):
         _set_path(raw, path, value)
 
@@ -64,39 +59,12 @@ def load_settings(project_root: Path) -> Settings:
 
 
 def _config_directories(root: Path, environment: EnvironmentPaths) -> list[Path]:
-    directories = [root / "config" / environment.name]
+    directories = [root / CONFIG_DIRECTORY / environment.name]
     if not directories[0].is_dir():
         raise SettingsError(f"configuration directory {directories[0]} does not exist")
     if environment.test_config_root is not None:
         directories.append(environment.test_config_root)
     return directories
-
-
-def _config_files(directory: Path) -> list[Path]:
-    if not directory.is_dir():
-        return []
-    files = sorted(directory.glob("*.json"))
-    base = [path for path in files if not path.name.endswith(LOCAL_SUFFIX)]
-    local = [path for path in files if path.name.endswith(LOCAL_SUFFIX)]
-    return base + local
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as error:
-        raise SettingsError(f"{path} is not valid JSON: {error}") from error
-    if not isinstance(data, dict):
-        raise SettingsError(f"{path} must contain a JSON object")
-    return data
-
-
-def _deep_merge(target: dict[str, Any], source: Mapping[str, Any]) -> None:
-    for key, value in source.items():
-        if isinstance(value, Mapping) and isinstance(target.get(key), dict):
-            _deep_merge(target[key], value)
-        else:
-            target[key] = value
 
 
 def _overrides(environ: Mapping[str, str]) -> list[tuple[list[str], Any]]:

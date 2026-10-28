@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from dailyscraper.settings.environment import (
     TEST_CONFIG_ROOT_VARIABLE,
     TEST_WORKSPACE_VARIABLE,
     TESTING_ENVIRONMENT,
+    development_paths,
     resolve_environment_paths,
     validate_testing_config_root,
     validate_testing_workspace,
@@ -32,6 +34,62 @@ def test_pytest_session_runs_in_isolated_testing_environment(project_root: Path)
 def test_testing_workspace_rejects_development_paths(project_root: Path, protected: Path) -> None:
     with pytest.raises(RuntimeError, match="protected development path"):
         validate_testing_workspace(project_root / protected / "pytest", project_root=project_root)
+
+
+def make_development_config(project: Path, paths: dict[str, str]) -> Path:
+    config = project / "config" / "development"
+    config.mkdir(parents=True)
+    (config / "paths.json").write_text(json.dumps({"paths": paths}), encoding="utf-8")
+    return project
+
+
+def test_protected_paths_follow_development_config(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DATA_ROOT", str(tmp_path / "storage"))
+    project = make_development_config(
+        tmp_path / "project",
+        {"data": "${env:DATA_ROOT}/data", "logs": "var/logs", "scrapers": "packages"},
+    )
+
+    for protected in (
+        tmp_path / "storage" / "data",
+        project / "var" / "logs",
+        project / "packages",
+        project / "config" / "development",
+    ):
+        with pytest.raises(RuntimeError, match="protected development path"):
+            validate_testing_workspace(protected / "pytest", project_root=project)
+    assert validate_testing_workspace(project / "data" / "pytest", project_root=project)
+
+
+def test_local_development_config_moves_protected_paths(tmp_path: Path) -> None:
+    project = make_development_config(
+        tmp_path / "project", {"data": "data", "logs": "logs", "scrapers": "scrapers"}
+    )
+    (project / "config" / "development" / "paths.local.json").write_text(
+        json.dumps({"paths": {"data": "elsewhere"}}), encoding="utf-8"
+    )
+
+    with pytest.raises(RuntimeError, match="protected development path"):
+        validate_testing_workspace(project / "elsewhere" / "pytest", project_root=project)
+    assert validate_testing_workspace(project / "data" / "pytest", project_root=project)
+
+
+def test_development_paths_read_variables_from_env_file(tmp_path: Path) -> None:
+    project = make_development_config(
+        tmp_path / "project", {"data": "${env:DAILYSCRAPER_UNIT_DATA}"}
+    )
+    (project / ".env").write_text("DAILYSCRAPER_UNIT_DATA=from-env-file\n", encoding="utf-8")
+
+    assert (project / "from-env-file").resolve() in development_paths(project)
+
+
+def test_unresolved_development_paths_fail_loudly(tmp_path: Path) -> None:
+    project = make_development_config(
+        tmp_path / "project", {"data": "${env:DAILYSCRAPER_UNIT_MISSING}"}
+    )
+
+    with pytest.raises(RuntimeError, match="DAILYSCRAPER_UNIT_MISSING"):
+        validate_testing_workspace(tmp_path / "workspace", project_root=project)
 
 
 @pytest.mark.parametrize("workspace", ["root", "project"])

@@ -1,0 +1,12 @@
+{
+    "browser": {
+        "args": [
+            "--disable-blink-features=AutomationControlled"
+        ],
+        "open_attempts": 2,
+        "playwright": {
+            "headless": true,
+            "wait_until": "domcontentloaded"
+        }
+    }
+}

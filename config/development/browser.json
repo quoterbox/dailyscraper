@@ -1,0 +1,23 @@
+{
+    "browser": {
+        "args": [
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-blink-features=AutomationControlled",
+            "--deny-permission-prompts",
+            "--disable-notifications"
+        ],
+        "open_attempts": 2,
+        "playwright": {
+            "headless": false,
+            "channel": "chrome",
+            "slow_mo_ms": 150,
+            "wait_until": "domcontentloaded",
+            "viewport": null
+        },
+        "stealth": {
+            "enabled": false
+        }
+    }
+}
