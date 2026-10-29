@@ -12,6 +12,8 @@ from dailyscraper.domain.errors import ErrorCategory
 class TaskKind(StrEnum):
     LIST = "list"
     DETAIL = "detail"
+    PROBE = "probe"
+    DISCOVER = "discover"
 
 
 class TaskStatus(StrEnum):
@@ -39,9 +41,12 @@ def _empty() -> Mapping[str, Any]:
 
 @dataclass(frozen=True)
 class TaskSpec:
-    """``payload``: ``{"link": url}`` for a list task, ``{"rows": [...]}`` for a detail task.
+    """``payload`` by kind:
 
-    Detail rows are 1-based positions in the run's input snapshot.
+    - list: ``{"link": url}``, optionally ``"pages": [first, last]``;
+    - detail: ``{"rows": [...]}``, 1-based positions in the run's input snapshot;
+    - probe: ``{"links": [...]}`` or ``{"rows": [...]}``;
+    - discover: ``{"link": url, "links": [urls sharing its pages]}``.
     """
 
     task_id: str

@@ -15,6 +15,7 @@ from dailyscraper.transport import Element
 logger = logging.getLogger(__name__)
 
 Item = dict[str, Any]
+PageRange = tuple[int, int]
 
 
 @dataclass(frozen=True)
@@ -40,12 +41,20 @@ class ListPageScraper:
         self.templates = [compile_list_template(template) for template in page.templates]
         self._position = 0
         self._on_page: Callable[[list[Item]], None] | None = None
+        self._range: PageRange | None = None
+        self._max_pages = 0
 
-    def start_url(self, link: str) -> str:
+    def page_url(self, link: str, page_num: int) -> str:
+        template = self.page.pagination.url_template
+        if template is None:
+            raise ValueError("page ranges need pagination.url_template")
+        return template.format(url=link, page=page_num)
+
+    def start_url(self, link: str, pages: PageRange | None = None) -> str:
         pagination = self.page.pagination
         if pagination.url_template is None:
             return link
-        return pagination.url_template.format(url=link, page=pagination.start_page)
+        return self.page_url(link, pages[0] if pages else pagination.start_page)
 
     def run(
         self,
@@ -53,11 +62,21 @@ class ListPageScraper:
         first_outcome: PageOutcome,
         *,
         on_page: Callable[[list[Item]], None] | None = None,
+        pages: PageRange | None = None,
+        max_pages: int = 0,
     ) -> ListResult:
-        """``on_page`` receives each page's accepted items as soon as the page is read."""
+        """``on_page`` receives each page's accepted items as soon as the page is read.
+
+        ``pages`` limits the run to a range of pages opened by the URL template;
+        ``max_pages`` stops after so many pages were read.
+        """
         result = ListResult(last_outcome=first_outcome)
         self._position = 0
         self._on_page = on_page
+        if pages is not None and self.page.pagination.url_template is None:
+            raise ValueError("page ranges need pagination.url_template")
+        self._range = pages
+        self._max_pages = max_pages
         if self.page.pagination.infinity_loading:
             self._run_infinite(link, first_outcome, result)
         else:
@@ -73,7 +92,8 @@ class ListPageScraper:
 
     def _run_paged(self, link: str, outcome: PageOutcome, result: ListResult) -> None:
         pagination = self.page.pagination
-        page_num = pagination.start_page if pagination.url_template else 1
+        first, last = self._range or (pagination.start_page, pagination.last_page)
+        page_num = first if pagination.url_template else 1
         previous: list[Item] = []
         same_content = 0
         while True:
@@ -85,7 +105,7 @@ class ListPageScraper:
             if template is None:
                 result.stop_reason = "template_not_found"
                 return
-            if page_num >= pagination.start_page:
+            if page_num >= first:
                 page_items = self._extract(
                     self.ctx.finder.find_all(template.items.item, self.page.waits.item), template
                 )
@@ -108,7 +128,10 @@ class ListPageScraper:
                 if not self._accept(page_items, link, result):
                     result.stop_reason = "last_item"
                     return
-            if pagination.last_page and page_num >= pagination.last_page:
+                if self._max_pages and len(result.visits) >= self._max_pages:
+                    result.stop_reason = "max_pages"
+                    return
+            if last and page_num >= last:
                 result.stop_reason = "last_page"
                 return
             self.ctx.pacer.delay(self.page.delays.before_next_page)
@@ -141,6 +164,9 @@ class ListPageScraper:
                 if not self._accept(new_items, link, result):
                     result.stop_reason = "last_item"
                     return
+                if self._max_pages and len(result.visits) >= self._max_pages:
+                    result.stop_reason = "max_pages"
+                    return
             else:
                 same_content += 1
                 if same_content >= self.page.pagination.max_same_content_pages:
@@ -163,9 +189,8 @@ class ListPageScraper:
     def _open_page(
         self, template: CompiledListTemplate, link: str, page_num: int
     ) -> PageOutcome | None:
-        pagination = self.page.pagination
-        if pagination.url_template is not None:
-            url = pagination.url_template.format(url=link, page=page_num)
+        if self.page.pagination.url_template is not None:
+            url = self.page_url(link, page_num)
             return self.ctx.navigator.open(url, PageType.LIST, allow_reload=False)
         if template.template.next_page is None:
             return None
@@ -175,6 +200,18 @@ class ListPageScraper:
         button.scroll_into_view()
         button.click()
         return self.ctx.navigator.wait(PageType.LIST, allow_reload=False)
+
+    def read_page(self, link: str) -> list[Item] | None:
+        """Items of the page open now, prepared by the package; ``None`` without a template."""
+        template = self._loaded_template()
+        if template is None:
+            return None
+        found = self.ctx.finder.find_all(template.items.item, self.page.waits.item)
+        prepared = (
+            self.ctx.actions.prepare_list_item(item, link)
+            for item in self._extract(found, template)
+        )
+        return [item for item in prepared if item is not None]
 
     def _loaded_template(self) -> CompiledListTemplate | None:
         finder = self.ctx.finder

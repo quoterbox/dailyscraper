@@ -47,6 +47,9 @@ class RuntimeSettings(SettingsModel):
     slot_memory_mb: int = Field(400, ge=1)
     memory_reserve_mb: int = Field(1024, ge=0)
     items_per_task: int = Field(50, ge=1)
+    pages_per_task: int = Field(
+        10, ge=0, description="Catalog pages per list task when the range is known; 0: whole link"
+    )
     task_attempts: int = Field(3, ge=1)
     retry_delay_seconds: float = Field(5.0, ge=0)
     retry_max_delay_seconds: float = Field(120.0, ge=0)
@@ -104,6 +107,9 @@ class ResourceBlockingSettings(SettingsModel):
 class ProfileSettings(SettingsModel):
     reset_on_identity_change: bool = Field(
         True, description="Start a clean profile when the proxy's exit identity changes"
+    )
+    bootstrap_ttl_seconds: float = Field(
+        86400.0, ge=0, description="Skip warmup and package bootstrap done this recently; 0: never"
     )
 
 
@@ -261,6 +267,14 @@ class ProxyCheckSettings(SettingsModel):
     ip_field: str | None = "ip"
     timeout_seconds: float = Field(15.0, gt=0)
     parallel: int = Field(8, ge=1)
+    min_healthy_total: int = Field(
+        1, ge=0, description="Fewer usable proxies over the whole run fail it before browsers start"
+    )
+    min_healthy_ratio: float = Field(0.1, ge=0, le=1)
+    min_healthy_per_scraper: int = Field(
+        1, ge=0, description="A scraper with fewer usable proxies is closed for the run"
+    )
+    min_healthy_ratio_per_scraper: float = Field(0.1, ge=0, le=1)
 
 
 class StorageSettings(SettingsModel):

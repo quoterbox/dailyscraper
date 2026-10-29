@@ -27,8 +27,10 @@ from dailyscraper.browsers.messages import (
     TaskFinished,
     TaskStarted,
 )
-from dailyscraper.detection import classify_error
+from dailyscraper.detection import category_for_state, classify_error
 from dailyscraper.domain import AttemptStatus, ErrorCategory, Proxy, TaskKind, TaskOutcome
+from dailyscraper.execution.discovery import PageKind, SearchResult
+from dailyscraper.execution.health import HealthReport
 from dailyscraper.execution.interventions import InterventionNotice, InterventionResult
 from dailyscraper.execution.partitions import ItemIdentity, PartitionSink, PartitionWriter
 from dailyscraper.execution.snapshots import SnapshotWriter
@@ -197,10 +199,21 @@ def _serve(
 
 
 def run_task(pipeline: DefaultPipeline, task: RunTask, config: SlotConfig) -> TaskOutcome:
+    payload = task.payload
     try:
         if task.kind is TaskKind.LIST:
-            return _list_outcome(pipeline.run_links([task.payload["link"]]))
-        positions = [int(row) for row in task.payload["rows"]]
+            pages = payload.get("pages")
+            result = pipeline.run_links([payload["link"]], pages=tuple(pages) if pages else None)
+            return _list_outcome(result)
+        if task.kind is TaskKind.DISCOVER:
+            return _discover_outcome(pipeline.discover(payload["link"]), payload["link"])
+        if task.kind is TaskKind.PROBE:
+            if payload.get("links"):
+                return _probe_outcome(pipeline.probe(links=payload["links"]))
+            positions = [int(row) for row in payload["rows"]]
+            rows = read_snapshot_rows(config.input_snapshot, positions)
+            return _probe_outcome(pipeline.probe(rows=rows, positions=positions))
+        positions = [int(row) for row in payload["rows"]]
         rows = read_snapshot_rows(config.input_snapshot, positions)
         result = pipeline.run_rows(rows, positions=positions)
         return _detail_outcome(result, positions)
@@ -228,6 +241,39 @@ def read_snapshot_rows(path: Path | None, positions: list[int]) -> list[dict[str
     if missing:
         raise ValueError(f"input snapshot has no rows {sorted(missing)}")
     return [found[position] for position in positions]
+
+
+def _discover_outcome(result: SearchResult, link: str) -> TaskOutcome:
+    details = {
+        "link": link,
+        "status": result.status,
+        "last_page": result.last_page,
+        "reason": result.reason,
+        "checks": [[check.page, check.kind.value] for check in result.checks],
+        "saved_pages": list(result.saved_pages),
+    }
+    stop = result.stopped_by
+    if stop is not None and stop.kind is not PageKind.UNKNOWN:
+        # Blocks and failed loads are the session's problem: another proxy may get through.
+        return TaskOutcome(
+            AttemptStatus.FAILED,
+            category=category_for_state(stop.state),
+            rows=result.rows,
+            error=result.reason,
+            details=details,
+        )
+    return TaskOutcome(AttemptStatus.COMPLETED, rows=result.rows, details=details)
+
+
+def _probe_outcome(report: HealthReport) -> TaskOutcome:
+    if report.ok:
+        return TaskOutcome(AttemptStatus.COMPLETED, details=report.details())
+    return TaskOutcome(
+        AttemptStatus.FAILED,
+        category=report.category,
+        error=report.reason,
+        details=report.details(),
+    )
 
 
 def _list_outcome(result: PipelineResult) -> TaskOutcome:

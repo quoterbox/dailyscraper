@@ -21,6 +21,7 @@ from dailyscraper.domain import (
     RunRecord,
     RunStatus,
     Task,
+    TaskKind,
     TaskOutcome,
     TaskSpec,
     TaskStatus,
@@ -77,10 +78,17 @@ class PartitionRegistry(Protocol):
 class TaskRepository(Protocol):
     def enqueue(self, specs: Sequence[TaskSpec]) -> None: ...
 
-    def claim(self, run_id: str, *, scrapers: Collection[str]) -> Task | None:
+    def claim(
+        self,
+        run_id: str,
+        *,
+        scrapers: Collection[str],
+        kinds: Collection[TaskKind] | None = None,
+    ) -> Task | None:
         """Take the next due pending task of one of ``scrapers`` and mark it running.
 
-        The least busy scraper goes first, then priority, then enqueue order.
+        ``kinds`` limits the task kinds; the least busy scraper goes first, then
+        priority, then enqueue order.
         """
         ...
 
@@ -108,7 +116,7 @@ class TaskRepository(Protocol):
         """Close the attempt and make the task pending again, due at ``not_before``."""
         ...
 
-    def cancel_pending(self, run_id: str) -> int: ...
+    def cancel_pending(self, run_id: str, *, scraper: str | None = None) -> int: ...
 
     def get(self, task_id: str) -> Task | None: ...
 

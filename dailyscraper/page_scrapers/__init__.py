@@ -2,7 +2,12 @@
 
 from dailyscraper.page_scrapers.auth_scraper import AuthPageScraper
 from dailyscraper.page_scrapers.detail_scraper import DetailPageScraper, DetailRowResult
-from dailyscraper.page_scrapers.list_scraper import ListPageScraper, ListPageVisit, ListResult
+from dailyscraper.page_scrapers.list_scraper import (
+    ListPageScraper,
+    ListPageVisit,
+    ListResult,
+    PageRange,
+)
 
 __all__ = [
     "AuthPageScraper",
@@ -11,4 +16,5 @@ __all__ = [
     "ListPageScraper",
     "ListPageVisit",
     "ListResult",
+    "PageRange",
 ]

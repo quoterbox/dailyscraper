@@ -17,12 +17,14 @@ from dailyscraper.browsers.messages import (
     commit_ref,
     seal_ref,
 )
+from dailyscraper.dispatch.gates import Gates
 from dailyscraper.domain import (
     AttemptStatus,
     CommandKind,
     ErrorCategory,
     EventLevel,
     Proxy,
+    Task,
     TaskKind,
     TaskOutcome,
     TaskStatus,
@@ -30,6 +32,7 @@ from dailyscraper.domain import (
 from dailyscraper.observability import RunEvents
 from dailyscraper.proxies import ProxyHealth
 from dailyscraper.storage import Store
+from dailyscraper.tasks.discovery import FollowUp
 from dailyscraper.tasks.retry import RetryPolicy, Verdict
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,7 @@ class DispatchResult:
     killed: bool = False
     interrupted: bool = False
     reasons: list[str] = field(default_factory=list)
+    failure: str | None = None
 
 
 def proxy_signal(outcome: TaskOutcome) -> str | None:
@@ -71,6 +75,9 @@ class Dispatcher:
         sites: Mapping[str, str] | None = None,
         poll_interval: float = 0.5,
         stop_grace: float = 30.0,
+        gates: Gates | None = None,
+        blocking: Mapping[str, bool] | None = None,
+        followups: Callable[[Task, TaskOutcome], FollowUp] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.store = store
@@ -84,6 +91,9 @@ class Dispatcher:
         self.sites = dict(sites or {})
         self.poll_interval = poll_interval
         self.stop_grace = stop_grace
+        self.gates = gates or Gates(self.scrapers)
+        self.blocking = dict(blocking or {})
+        self.followups = followups
         self._clock = clock
         self.result = DispatchResult()
         self._stop_requested_at: float | None = None
@@ -142,7 +152,11 @@ class Dispatcher:
                 for scraper in self.scrapers
                 if self.browsers.idle_slot(scraper) or self.browsers.can_start(scraper)
             ]
-            task = self.store.tasks.claim(self.run_id, scrapers=allowed) if allowed else None
+            task = None
+            for scrapers, kinds in self.gates.claimable(allowed):
+                task = self.store.tasks.claim(self.run_id, scrapers=scrapers, kinds=kinds)
+                if task is not None:
+                    break
             if task is None:
                 return
             slot = self.browsers.idle_slot(task.scraper, task.avoid) or self.browsers.start(
@@ -268,6 +282,8 @@ class Dispatcher:
                 )
             self.store.tasks.finish(attempt_id, outcome)
             verdict = outcome.status.value
+            if not self.stopping:
+                self._finished_task(task, outcome)
         self.events.emit(
             "task.finished",
             level=EventLevel.INFO
@@ -280,6 +296,63 @@ class Dispatcher:
             rows=outcome.rows,
             error=outcome.error,
         )
+
+    def _finished_task(self, task: Task, outcome: TaskOutcome) -> None:
+        if task.kind is TaskKind.PROBE:
+            self._probe_finished(task, outcome)
+        elif task.kind is TaskKind.DISCOVER and self.followups is not None:
+            self._discovery_finished(task, outcome)
+
+    def _probe_finished(self, task: Task, outcome: TaskOutcome) -> None:
+        scraper = task.scraper
+        probe = dict(outcome.details or {})
+        if outcome.status is AttemptStatus.COMPLETED:
+            self.gates.open(scraper, "health probe passed")
+            self.events.emit(
+                "gate.opened", scraper=scraper, reason="health probe passed", probe=probe
+            )
+            return
+        reason = f"health probe failed: {outcome.error or outcome.category}"
+        if self.blocking.get(scraper):
+            self.close_gate(scraper, reason, probe=probe)
+            return
+        self.gates.open(scraper, reason)
+        self.events.emit(
+            "gate.opened", level=EventLevel.WARNING, scraper=scraper, reason=reason, probe=probe
+        )
+
+    def close_gate(self, scraper: str, reason: str, **data) -> None:
+        """The scraper takes no more tasks in this run; its pending ones are cancelled."""
+        self.gates.close(scraper, reason)
+        cancelled = self.store.tasks.cancel_pending(self.run_id, scraper=scraper)
+        logger.error("Scraper %s closed: %s", scraper, reason)
+        self.events.emit(
+            "gate.closed",
+            level=EventLevel.ERROR,
+            scraper=scraper,
+            reason=reason,
+            cancelled=cancelled,
+            **data,
+        )
+
+    def _discovery_finished(self, task: Task, outcome: TaskOutcome) -> None:
+        followup = self.followups(task, outcome)
+        if followup.specs:
+            self.store.tasks.enqueue(followup.specs)
+        details = outcome.details or {}
+        self.events.emit(
+            "discovery.finished",
+            level=EventLevel.INFO if followup.error is None else EventLevel.ERROR,
+            scraper=task.scraper,
+            link=task.payload.get("link"),
+            status=details.get("status"),
+            last_page=followup.last_page,
+            reason=details.get("reason") or outcome.error,
+            tasks=len(followup.specs),
+        )
+        if followup.error is not None:
+            self.result.failure = followup.error
+            self.stop(followup.error)
 
     def _report_proxy(self, scraper: str, attempt_id: str, outcome: TaskOutcome) -> str | None:
         """Tell proxy health how the session did; returns the proxy to avoid on retry."""

@@ -305,21 +305,38 @@ class SQLiteTasks:
 
         self._db.write(operation)
 
-    def claim(self, run_id: str, *, scrapers: Collection[str]) -> Task | None:
-        if not scrapers:
+    def claim(
+        self,
+        run_id: str,
+        *,
+        scrapers: Collection[str],
+        kinds: Collection[TaskKind] | None = None,
+    ) -> Task | None:
+        if not scrapers or (kinds is not None and not kinds):
             return None
         names = list(scrapers)
+        kind_filter, kind_values = "", ()
+        if kinds is not None:
+            kind_values = tuple(kind.value for kind in kinds)
+            kind_filter = f" AND t.kind IN ({', '.join('?' for _ in kind_values)})"
 
         def operation(c: sqlite3.Connection) -> Task | None:
             now = self._clock()
             row = c.execute(
                 "SELECT t.* FROM tasks t WHERE t.run_id = ? AND t.status = ?"
-                f" AND t.scraper IN ({', '.join('?' for _ in names)})"
+                f" AND t.scraper IN ({', '.join('?' for _ in names)}){kind_filter}"
                 " AND (t.not_before IS NULL OR t.not_before <= ?)"
                 " ORDER BY (SELECT COUNT(*) FROM tasks r WHERE r.run_id = t.run_id"
                 " AND r.scraper = t.scraper AND r.status = ?), t.priority DESC, t.seq"
                 " LIMIT 1",
-                (run_id, TaskStatus.PENDING.value, *names, now, TaskStatus.RUNNING.value),
+                (
+                    run_id,
+                    TaskStatus.PENDING.value,
+                    *names,
+                    *kind_values,
+                    now,
+                    TaskStatus.RUNNING.value,
+                ),
             ).fetchone()
             if row is None:
                 return None
@@ -459,15 +476,18 @@ class SQLiteTasks:
 
         return self._db.write(operation)
 
-    def cancel_pending(self, run_id: str) -> int:
-        return self._db.write(
-            lambda c: (
-                c.execute(
-                    "UPDATE tasks SET status = ?, updated_at = ? WHERE run_id = ? AND status = ?",
-                    (TaskStatus.CANCELLED.value, self._clock(), run_id, TaskStatus.PENDING.value),
-                ).rowcount
-            )
+    def cancel_pending(self, run_id: str, *, scraper: str | None = None) -> int:
+        query = "UPDATE tasks SET status = ?, updated_at = ? WHERE run_id = ? AND status = ?"
+        params: tuple[Any, ...] = (
+            TaskStatus.CANCELLED.value,
+            self._clock(),
+            run_id,
+            TaskStatus.PENDING.value,
         )
+        if scraper is not None:
+            query += " AND scraper = ?"
+            params += (scraper,)
+        return self._db.write(lambda c: c.execute(query, params).rowcount)
 
     def get(self, task_id: str) -> Task | None:
         row = self._db.read(

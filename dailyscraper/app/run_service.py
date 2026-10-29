@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 import psutil
 
 from dailyscraper.browsers import DEFAULT_OPENER, BrowserManager, SlotConfig
-from dailyscraper.dispatch import Dispatcher, DispatchResult
+from dailyscraper.dispatch import Dispatcher, DispatchResult, Gates
 from dailyscraper.domain import (
     DIRECT_PROXY,
     Attempt,
@@ -28,6 +28,7 @@ from dailyscraper.domain import (
     Proxy,
     RunRecord,
     RunStatus,
+    Task,
     TaskKind,
     TaskStatus,
     new_run_id,
@@ -53,6 +54,7 @@ from dailyscraper.schema import Inputs, ScraperPackage, load_scraper_package
 from dailyscraper.settings import Settings, load_variables
 from dailyscraper.settings.environment import resolve_environment_paths
 from dailyscraper.storage import RunLayout, Store
+from dailyscraper.tasks.discovery import after_discovery
 from dailyscraper.tasks.inputs import InputSnapshot, create_input_snapshot
 from dailyscraper.tasks.planner import plan_tasks
 from dailyscraper.tasks.retry import RetryPolicy
@@ -94,6 +96,7 @@ class _Execution:
     error: str | None = None
     snapshots: dict[str, InputSnapshot] = field(default_factory=dict)
     dispatch: DispatchResult | None = None
+    gates: Gates | None = None
 
     def fail(self, status: RunStatus, error: str) -> None:
         if self.status in {RunStatus.FAILED, RunStatus.INTERRUPTED} and self.error:
@@ -228,17 +231,22 @@ class RunService:
                 package,
                 snapshot=execution.snapshots.get(name),
                 items_per_task=runtime.items_per_task,
+                pages_per_task=runtime.pages_per_task,
                 max_attempts=runtime.task_attempts,
             )
         ]
         self.store.tasks.enqueue(specs)
         events.emit("run.planned", tasks=len(specs))
+        gates = execution.gates = Gates(
+            packages, probing={spec.scraper for spec in specs if spec.kind is TaskKind.PROBE}
+        )
 
         sites = {name: site_key(package) for name, package in packages.items()}
         pool = build_pool(self.settings.proxies)
         health = ProxyHealth(self.store, self.settings.proxy_health)
         allocator = ProxyAllocator(pool, health)
         self._check_proxies(pool, packages, sites, health, events)
+        closed = self._proxy_thresholds(pool, allocator, packages, sites, events)
 
         def slot_config(scraper: str, slot_id: str, proxy: Proxy | None) -> SlotConfig:
             return self._slot_config(
@@ -274,8 +282,28 @@ class RunService:
             sites=sites,
             poll_interval=runtime.poll_interval_seconds,
             stop_grace=runtime.stop_grace_seconds,
+            gates=gates,
+            blocking={
+                name: bool(
+                    package.definition.health_check and package.definition.health_check.blocking
+                )
+                for name, package in packages.items()
+            },
+            followups=lambda task, outcome: after_discovery(
+                task,
+                outcome,
+                packages[task.scraper],
+                pages_per_task=runtime.pages_per_task,
+                max_attempts=runtime.task_attempts,
+                saved_pages=self._saved_pages(task, events),
+            ),
         )
+        for name, reason in closed.items():
+            dispatcher.close_gate(name, reason)
         execution.dispatch = dispatcher.run()
+        if execution.dispatch.failure is not None:
+            execution.fail(RunStatus.FAILED, execution.dispatch.failure)
+            return
         if execution.dispatch.stopped:
             execution.fail(RunStatus.INTERRUPTED, "; ".join(execution.dispatch.reasons))
             return
@@ -360,11 +388,90 @@ class RunService:
         failed = sum(1 for result in results if not result.ok)
         logger.info("Network check: %s of %s proxies failed", failed, len(results))
 
+    def _saved_pages(self, task: Task, events: RunEvents) -> list[int]:
+        """Pages whose items the result keeps: those of the task's latest attempt with rows."""
+        numbers = [
+            int(commit.attempt_id.rpartition("#")[2])
+            for commit in self.store.partitions.commits(task.run_id, task.scraper)
+            if commit.task_id == task.task_id and commit.attempt_id
+        ]
+        if not numbers:
+            return []
+        attempt_id = f"{task.task_id}#{max(numbers)}"
+        attempt = next(
+            (
+                a
+                for a in self.store.tasks.attempts(task.run_id, task_id=task.task_id)
+                if a.attempt_id == attempt_id
+            ),
+            None,
+        )
+        saved = attempt.details.get("saved_pages") if attempt is not None else None
+        if saved is None:
+            events.emit(
+                "discovery.pages_unknown",
+                level=EventLevel.WARNING,
+                scraper=task.scraper,
+                attempt=attempt_id,
+                reason="the attempt that saved rows ended without a report; its pages may repeat",
+            )
+            return []
+        return [int(page) for page in saved]
+
+    def _proxy_thresholds(
+        self,
+        pool: ProxyPool,
+        allocator: ProxyAllocator,
+        packages: Mapping[str, ScraperPackage],
+        sites: Mapping[str, str],
+        events: RunEvents,
+    ) -> dict[str, str]:
+        """Scrapers to close for too few usable proxies; raises when the whole run has too few."""
+        if pool.empty:
+            return {}
+        check = self.settings.proxy_check
+        closed: dict[str, str] = {}
+        selected_all: set[str] = set()
+        usable_all: set[str] = set()
+        for name in packages:
+            names = self.settings.selected_proxies(name)
+            selected = {proxy.proxy_id for proxy in pool.select(names)}
+            usable = {
+                proxy.proxy_id
+                for proxy in allocator.candidates(sites[name], names)
+                if proxy is not None
+            }
+            selected_all |= selected
+            usable_all |= usable
+            if not _enough(
+                len(usable),
+                len(selected),
+                check.min_healthy_per_scraper,
+                check.min_healthy_ratio_per_scraper,
+            ):
+                closed[name] = f"{len(usable)} of {len(selected)} proxies usable"
+        events.emit(
+            "proxy.thresholds",
+            level=EventLevel.WARNING if closed else EventLevel.INFO,
+            usable=len(usable_all),
+            total=len(selected_all),
+            closed=closed,
+        )
+        if not _enough(
+            len(usable_all), len(selected_all), check.min_healthy_total, check.min_healthy_ratio
+        ):
+            raise RunBlocked(f"{len(usable_all)} of {len(selected_all)} proxies usable")
+        return closed
+
     def _outcome(
         self, run_id: str, packages: Mapping[str, ScraperPackage], execution: _Execution
     ) -> RunStatus:
-        counts = self.store.tasks.counts(run_id)
-        if counts.get(TaskStatus.FAILED) or counts.get(TaskStatus.CANCELLED):
+        # A probe that failed without closing its gate is a warning; the work decides.
+        unfinished = {TaskStatus.FAILED, TaskStatus.CANCELLED}
+        if any(
+            task.status in unfinished and task.kind is not TaskKind.PROBE
+            for task in self.store.tasks.list(run_id)
+        ):
             return RunStatus.COMPLETED_WITH_ERRORS
         for name in packages:
             snapshot = execution.snapshots.get(name)
@@ -489,6 +596,7 @@ class RunService:
         tasks = self.store.tasks.list(run_id)
         attempts = self.store.tasks.attempts(run_id)
         final = _final_attempts(attempts)
+        gates = execution.gates.summary() if execution.gates is not None else {}
         interventions = Counter(
             (event.scraper, event.type.removeprefix("intervention."))
             for event in self.store.events.list(run_id, types=INTERVENTION_EVENTS)
@@ -503,6 +611,15 @@ class RunService:
                 "statuses": self._statuses(run_id, layout, name, snapshot),
                 "tasks": dict(Counter(task.status.value for task in own)),
                 "attempts": sum(task.attempts for task in own),
+                "gate": gates.get(name),
+                "discovery": [
+                    {
+                        key: final[task.task_id].details.get(key)
+                        for key in ("link", "status", "last_page", "saved_pages", "reason")
+                    }
+                    for task in own
+                    if task.kind is TaskKind.DISCOVER and task.task_id in final
+                ],
                 "interventions": {
                     result: count
                     for (scraper, result), count in sorted(interventions.items())
@@ -563,6 +680,14 @@ class RunService:
             return dict(Counter(self.store.partitions.item_statuses(run_id, name).values()))
         records = scraper_records(self.store.partitions, layout, run_id, name)
         return dict(Counter(record.get("status") or "ok" for record in records))
+
+
+class RunBlocked(RuntimeError):
+    """The run cannot start its work: too few usable proxies."""
+
+
+def _enough(usable: int, total: int, minimum: int, ratio: float) -> bool:
+    return usable >= minimum and usable >= ratio * total
 
 
 def site_key(package: ScraperPackage) -> str:

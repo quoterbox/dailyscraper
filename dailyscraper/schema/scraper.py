@@ -43,6 +43,12 @@ class Discovery(FrozenModel):
     ] = "fallback_first_chunk"
     on_blocked: Literal["skip_link", "fallback_first_chunk", "fail_run"] = "skip_link"
     empty_when_no_items_text_markers: tuple[str, ...] = ()
+    max_page: int = Field(
+        1000, ge=1, description="Search limit when pagination.last_page is not set"
+    )
+    save_items: bool = Field(
+        True, description="Keep the items of pages opened by the search; list tasks skip them"
+    )
 
 
 class HealthCheck(FrozenModel):

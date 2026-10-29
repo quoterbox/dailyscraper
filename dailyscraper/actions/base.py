@@ -83,5 +83,9 @@ class ScraperActions:
     def collect_from_input(self, items: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         return None
 
+    def discover_last_page(self, url: str) -> int | None:
+        """The link's last catalog page found by the package itself, e.g. from an API."""
+        return None
+
     def run_warnings(self) -> list[dict[str, Any]]:
         return []

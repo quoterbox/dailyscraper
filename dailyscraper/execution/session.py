@@ -15,6 +15,7 @@ from dailyscraper.pipelines import DefaultPipeline
 from dailyscraper.schema import ScraperPackage
 from dailyscraper.settings import Settings
 from dailyscraper.transport import PlaywrightBrowser, SessionPlan
+from dailyscraper.transport.profiles import ProfileState
 
 
 @contextmanager
@@ -50,6 +51,7 @@ def open_pipeline(
                 reporter=interventions,
                 bring_to_front=browser.page.playwright_page.bring_to_front,
             ),
+            profile_state=ProfileState(plan.profile_dir) if plan and plan.profile_dir else None,
         )
         yield pipeline_class(
             PageContext(

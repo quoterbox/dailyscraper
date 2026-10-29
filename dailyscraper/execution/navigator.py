@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import replace
 
@@ -29,6 +30,7 @@ from dailyscraper.transport import (
     Navigation,
     is_timeout_error,
 )
+from dailyscraper.transport.profiles import ProfileState
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +48,10 @@ class Navigator:
         browser: BrowserSettings,
         pacer: Pacer,
         intervention: Intervention | None = None,
+        profile_state: ProfileState | None = None,
     ) -> None:
         self.page = page
+        self.profile_state = profile_state
         self.finder = finder
         self.definition = definition
         self.actions = actions
@@ -95,12 +99,22 @@ class Navigator:
             return
         self._warmed_up = True
         navigation = self.definition.navigation
+        if not navigation.warmup_urls:
+            return
+        version = hashlib.sha256("\n".join(navigation.warmup_urls).encode()).hexdigest()[:16]
+        if self._done_recently("warmup", version):
+            logger.info("Warmup skipped: the profile was warmed up recently")
+            return
+        opened = False
         for url in navigation.warmup_urls:
             logger.info("Warmup open: %s", url)
             if self._open_with_attempts(url).ok:
+                opened = True
                 self.pacer.delay(navigation.delay_after_warmup)
             else:
                 logger.warning("Warmup URL failed: %s", url)
+        if opened:
+            self._remember("warmup", version)
 
     def policy(self, page_type: PageType) -> StatePolicy:
         if page_type not in self._policies:
@@ -138,13 +152,27 @@ class Navigator:
         version = self.actions.bootstrap_version()
         if not version or version in self._bootstrapped_versions:
             return False
+        self._bootstrapped_versions.add(version)
+        if self._done_recently("bootstrap", version):
+            logger.info("Session bootstrap skipped: done recently in this profile")
+            return False
         if self.actions.validate_bootstrap(url) is True:
-            self._bootstrapped_versions.add(version)
+            self._remember("bootstrap", version)
             return False
         logger.info("Session bootstrap started: version=%s target=%s", version, url)
         reopen = bool(self.actions.bootstrap(url))
-        self._bootstrapped_versions.add(version)
+        self._remember("bootstrap", version)
         return reopen
+
+    def _done_recently(self, key: str, version: str) -> bool:
+        if self.profile_state is None:
+            return False
+        ttl = self.browser.profiles.bootstrap_ttl_seconds
+        return self.profile_state.is_fresh(key, version, ttl)
+
+    def _remember(self, key: str, version: str) -> None:
+        if self.profile_state is not None:
+            self.profile_state.mark(key, version)
 
     def _open_with_attempts(self, url: str) -> Navigation:
         injector = get_fault_injector()

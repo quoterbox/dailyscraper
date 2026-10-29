@@ -367,6 +367,26 @@ def test_released_and_cancelled_tasks(store: Store) -> None:
     assert [task.status for task in store.tasks.list("r1")] == [TaskStatus.CANCELLED] * 2
 
 
+def test_claim_can_be_limited_to_task_kinds(store: Store) -> None:
+    probe = TaskSpec(
+        task_id="p", run_id="r1", scraper="catalog", kind=TaskKind.PROBE, payload={"links": []}
+    )
+    store.tasks.enqueue([detail_task("d"), probe])
+
+    assert store.tasks.claim("r1", scrapers=["catalog"], kinds=[TaskKind.LIST]) is None
+    assert store.tasks.claim("r1", scrapers=["catalog"], kinds=[]) is None
+    assert store.tasks.claim("r1", scrapers=["catalog"], kinds=[TaskKind.PROBE]).task_id == "p"
+    assert store.tasks.claim("r1", scrapers=["catalog"]).task_id == "d"
+
+
+def test_pending_tasks_of_one_scraper_are_cancelled(store: Store) -> None:
+    store.tasks.enqueue([detail_task("a"), detail_task("b", scraper="other")])
+
+    assert store.tasks.cancel_pending("r1", scraper="other") == 1
+    statuses = {task.task_id: task.status for task in store.tasks.list("r1")}
+    assert statuses == {"a": TaskStatus.PENDING, "b": TaskStatus.CANCELLED}
+
+
 def test_item_statuses_follow_the_latest_commit(store: Store) -> None:
     def detail_batch(commit_id, start, end, attempt_id, items):
         return BatchCommit(
