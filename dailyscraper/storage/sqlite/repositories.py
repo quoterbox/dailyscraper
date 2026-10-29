@@ -21,6 +21,9 @@ from dailyscraper.domain import (
     EventLevel,
     HealthStatus,
     LeaseKey,
+    Notification,
+    NotificationRecord,
+    NotificationStatus,
     PartitionRef,
     PartitionSeal,
     PartitionState,
@@ -32,6 +35,7 @@ from dailyscraper.domain import (
     TaskOutcome,
     TaskSpec,
     TaskStatus,
+    Urgency,
 )
 from dailyscraper.storage.contracts import CommitConflict, StorageError
 from dailyscraper.storage.sqlite.database import Database, dumps, loads
@@ -651,13 +655,24 @@ class SQLiteEvents:
 
         self._db.write(operation)
 
-    def list(self, run_id: str, *, types: Sequence[str] | None = None) -> list[Event]:
-        query = "SELECT * FROM events WHERE run_id = ?"
-        params: tuple[Any, ...] = (run_id,)
+    def list(
+        self,
+        run_id: str,
+        *,
+        types: Sequence[str] | None = None,
+        after: int = 0,
+        limit: int | None = None,
+    ) -> list[Event]:
+        query = "SELECT * FROM events WHERE run_id = ? AND seq > ?"
+        params: tuple[Any, ...] = (run_id, after)
         if types:
             query += f" AND type IN ({', '.join('?' for _ in types)})"
             params += tuple(types)
-        rows = self._db.read(lambda c: c.execute(query + " ORDER BY seq", params).fetchall())
+        query += " ORDER BY seq"
+        if limit is not None:
+            query += " LIMIT ?"
+            params += (limit,)
+        rows = self._db.read(lambda c: c.execute(query, params).fetchall())
         return [
             Event(
                 event_id=row["event_id"],
@@ -669,6 +684,7 @@ class SQLiteEvents:
                 scraper=row["scraper"],
                 data=MappingProxyType(loads(row["data_json"])),
                 schema_version=row["schema_version"],
+                seq=row["seq"],
             )
             for row in rows
         ]
@@ -719,6 +735,176 @@ class SQLiteDeliveries:
             )
             for row in rows
         ]
+
+
+class SQLiteNotifications:
+    def __init__(self, db: Database, clock: Clock) -> None:
+        self._db = db
+        self._clock = clock
+
+    def enqueue(
+        self, notifications: Sequence[Notification], *, consumer: str, cursor: int
+    ) -> dict[str, int]:
+        def operation(c: sqlite3.Connection) -> dict[str, int]:
+            now = self._clock()
+            counts = {"created": 0, "merged": 0, "suppressed": 0}
+            for notification in notifications:
+                counts[_store_notification(c, notification, now)] += 1
+            c.execute(
+                "INSERT INTO consumer_cursors (consumer, position, updated_at) VALUES (?, ?, ?)"
+                " ON CONFLICT (consumer) DO UPDATE SET"
+                " position = MAX(position, excluded.position), updated_at = excluded.updated_at",
+                (consumer, cursor, now),
+            )
+            return counts
+
+        return self._db.write(operation)
+
+    def cursor(self, consumer: str) -> int:
+        row = self._db.read(
+            lambda c: c.execute(
+                "SELECT position FROM consumer_cursors WHERE consumer = ?", (consumer,)
+            ).fetchone()
+        )
+        return row["position"] if row is not None else 0
+
+    def due(self, *, run_id: str | None = None, limit: int = 20) -> list[NotificationRecord]:
+        query = "SELECT * FROM notifications WHERE status = ? AND next_attempt_at <= ?"
+        params: tuple[Any, ...] = (NotificationStatus.PENDING.value, self._clock())
+        if run_id is not None:
+            query += " AND run_id = ?"
+            params += (run_id,)
+        query += " ORDER BY CASE urgency WHEN 'urgent' THEN 0 ELSE 1 END, created_at, rowid LIMIT ?"
+        rows = self._db.read(lambda c: c.execute(query, (*params, limit)).fetchall())
+        return [_notification(row) for row in rows]
+
+    def mark_sent(self, notification_id: str) -> None:
+        self._update(
+            notification_id,
+            "status = ?, sent_at = ?, attempts = attempts + 1, last_error = NULL",
+            (NotificationStatus.SENT.value, self._clock()),
+        )
+
+    def reschedule(self, notification_id: str, *, delay_seconds: float, error: str) -> None:
+        self._update(
+            notification_id,
+            "next_attempt_at = ?, attempts = attempts + 1, last_error = ?",
+            (_after(self._clock(), delay_seconds), error),
+        )
+
+    def mark_failed(self, notification_id: str, *, error: str) -> None:
+        self._update(
+            notification_id,
+            "status = ?, attempts = attempts + 1, last_error = ?",
+            (NotificationStatus.FAILED.value, error),
+        )
+
+    def expire(self) -> int:
+        return self._db.write(
+            lambda c: (
+                c.execute(
+                    "UPDATE notifications SET status = ?, last_error = 'expired before sending'"
+                    " WHERE status = ? AND expires_at <= ?",
+                    (
+                        NotificationStatus.EXPIRED.value,
+                        NotificationStatus.PENDING.value,
+                        self._clock(),
+                    ),
+                ).rowcount
+            )
+        )
+
+    def list(self, run_id: str) -> list[NotificationRecord]:
+        rows = self._db.read(
+            lambda c: c.execute(
+                "SELECT * FROM notifications WHERE run_id = ? ORDER BY created_at, rowid",
+                (run_id,),
+            ).fetchall()
+        )
+        return [_notification(row) for row in rows]
+
+    def _update(self, notification_id: str, assignments: str, params: tuple[Any, ...]) -> None:
+        self._db.write(
+            lambda c: c.execute(
+                f"UPDATE notifications SET {assignments} WHERE notification_id = ?",
+                (*params, notification_id),
+            )
+        )
+
+
+def _store_notification(c: sqlite3.Connection, notification: Notification, now: str) -> str:
+    if c.execute(
+        "SELECT 1 FROM notifications WHERE notification_id = ?", (notification.notification_id,)
+    ).fetchone():
+        # The same event replayed after an interrupted consumer.
+        return "merged"
+    same = (notification.coalesce_key, notification.channel)
+    pending = c.execute(
+        "SELECT notification_id FROM notifications WHERE coalesce_key = ? AND channel = ?"
+        " AND status = ? ORDER BY created_at DESC LIMIT 1",
+        (*same, NotificationStatus.PENDING.value),
+    ).fetchone()
+    if pending is not None:
+        # The first event's text is kept: it is what the operator acts on.
+        c.execute(
+            "UPDATE notifications SET event_count = event_count + 1 WHERE notification_id = ?",
+            (pending["notification_id"],),
+        )
+        return "merged"
+    recent = c.execute(
+        "SELECT notification_id FROM notifications WHERE coalesce_key = ? AND channel = ?"
+        " AND status = ? AND sent_at > ? ORDER BY sent_at DESC LIMIT 1",
+        (*same, NotificationStatus.SENT.value, _after(now, -notification.cooldown_seconds)),
+    ).fetchone()
+    if recent is not None:
+        c.execute(
+            "UPDATE notifications SET suppressed_count = suppressed_count + 1"
+            " WHERE notification_id = ?",
+            (recent["notification_id"],),
+        )
+        return "suppressed"
+    c.execute(
+        "INSERT INTO notifications (notification_id, run_id, kind, coalesce_key, channel,"
+        " urgency, status, title, body, created_at, next_attempt_at, expires_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            notification.notification_id,
+            notification.run_id,
+            notification.kind,
+            notification.coalesce_key,
+            notification.channel,
+            notification.urgency.value,
+            NotificationStatus.PENDING.value,
+            notification.title,
+            notification.body,
+            now,
+            now,
+            _after(now, notification.ttl_seconds),
+        ),
+    )
+    return "created"
+
+
+def _notification(row: sqlite3.Row) -> NotificationRecord:
+    return NotificationRecord(
+        notification_id=row["notification_id"],
+        run_id=row["run_id"],
+        kind=row["kind"],
+        coalesce_key=row["coalesce_key"],
+        channel=row["channel"],
+        urgency=Urgency(row["urgency"]),
+        title=row["title"],
+        body=row["body"],
+        status=NotificationStatus(row["status"]),
+        created_at=row["created_at"],
+        next_attempt_at=row["next_attempt_at"],
+        expires_at=row["expires_at"],
+        attempts=row["attempts"],
+        event_count=row["event_count"],
+        suppressed_count=row["suppressed_count"],
+        sent_at=row["sent_at"],
+        last_error=row["last_error"],
+    )
 
 
 def _after(iso: str, seconds: float) -> str:

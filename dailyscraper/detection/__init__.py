@@ -12,9 +12,10 @@ from dailyscraper.detection.errors import (
     state_for_navigation_error,
 )
 from dailyscraper.detection.policy import Signals, StatePolicy, build_policy
-from dailyscraper.detection.waiter import StateWaiter
+from dailyscraper.detection.waiter import Intervention, StateWaiter
 
 __all__ = [
+    "Intervention",
     "PageProbe",
     "Signals",
     "StatePolicy",

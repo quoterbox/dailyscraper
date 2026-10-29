@@ -105,3 +105,47 @@ def ip_server():
     thread.start()
     yield f"http://127.0.0.1:{server.server_address[1]}/ip"
     server.shutdown()
+
+
+class TelegramInbox:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.messages: list[dict] = []
+        self.arrived = threading.Condition()
+
+    def wait_for(self, text: str, timeout: float = 30) -> dict:
+        with self.arrived:
+            found = self.arrived.wait_for(
+                lambda: next((m for m in self.messages if text in m["text"]), None), timeout
+            )
+        assert found, f"no message with {text!r} in {self.messages}"
+        return found
+
+
+@pytest.fixture
+def telegram_server():
+    """A local stand-in for the Telegram Bot API that keeps every ``sendMessage``."""
+
+    inbox: TelegramInbox
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            with inbox.arrived:
+                inbox.messages.append({"path": self.path, **payload})
+                inbox.arrived.notify_all()
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    inbox = TelegramInbox(f"http://127.0.0.1:{server.server_address[1]}")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield inbox
+    server.shutdown()

@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from dailyscraper.actions import ScraperActions
 from dailyscraper.detection import (
+    Intervention,
     StatePolicy,
     StateWaiter,
     build_policy,
@@ -44,6 +45,7 @@ class Navigator:
         actions: ScraperActions,
         browser: BrowserSettings,
         pacer: Pacer,
+        intervention: Intervention | None = None,
     ) -> None:
         self.page = page
         self.finder = finder
@@ -61,6 +63,7 @@ class Navigator:
             ),
             hook=actions.classify_page_state,
             check_interrupted=pacer.check_interrupted,
+            intervention=intervention,
         )
 
     def open(self, url: str, page_type: PageType, *, allow_reload: bool = True) -> PageOutcome:

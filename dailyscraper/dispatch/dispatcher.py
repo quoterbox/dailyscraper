@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from dailyscraper.browsers.manager import BrowserManager, SlotEvent, SlotExited, SlotMessage
 from dailyscraper.browsers.messages import (
     Ack,
+    InterventionEnded,
+    InterventionStarted,
     ItemsCommitted,
     PartitionSealed,
     TaskFinished,
@@ -115,6 +117,7 @@ class Dispatcher:
         self.result.reasons.append(reason)
         self._stop_requested_at = self._clock()
         self.store.tasks.cancel_pending(self.run_id)
+        self.events.emit("run.stopping", level=EventLevel.WARNING, reason=reason)
 
     def _step(self) -> None:
         self._apply_commands()
@@ -176,6 +179,42 @@ class Dispatcher:
             )
         elif isinstance(message, TaskFinished):
             self._close_attempt(message.attempt_id, message.outcome)
+        elif isinstance(message, InterventionStarted | InterventionEnded):
+            self._intervention(event, message)
+
+    def _intervention(
+        self, event: SlotMessage, message: InterventionStarted | InterventionEnded
+    ) -> None:
+        slot = self.browsers.slots.get(event.slot_id)
+        common = {
+            "scraper": event.scraper,
+            "slot": event.slot_id,
+            "attempt": message.attempt_id,
+            "proxy": slot.proxy_id if slot is not None else None,
+            "host": self.host_id,
+            "kind": message.kind,
+            "url": message.url,
+        }
+        if isinstance(message, InterventionStarted):
+            deadline = datetime.fromisoformat(self.store.now()) + timedelta(
+                seconds=message.timeout_seconds
+            )
+            self.events.emit(
+                "intervention.required",
+                level=EventLevel.WARNING,
+                page_type=message.page_type,
+                reason=message.reason,
+                timeout_seconds=message.timeout_seconds,
+                deadline_at=deadline.isoformat(timespec="seconds"),
+                **common,
+            )
+            return
+        self.events.emit(
+            f"intervention.{message.result}",
+            level=EventLevel.INFO if message.result == "resolved" else EventLevel.WARNING,
+            seconds=message.seconds,
+            **common,
+        )
 
     def _acknowledge(self, event: SlotMessage, ref: str, register, value) -> None:
         try:

@@ -27,6 +27,7 @@ class Event:
     scraper: str | None = None
     data: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     schema_version: int = EVENT_SCHEMA_VERSION
+    seq: int = 0
 
 
 class DeliveryStatus(StrEnum):

@@ -295,6 +295,82 @@ class OutputSettings(SettingsModel):
     deliveries: tuple[DeliverySettings, ...] = ()
 
 
+class ManualInterventionSettings(SettingsModel):
+    enabled: bool = True
+    timeout_seconds: float = Field(600.0, gt=0)
+    poll_interval_seconds: float = Field(2.0, gt=0)
+    page_types: tuple[Literal["list", "detail", "auth"], ...] = ("list", "detail")
+    allow_headless: bool = Field(
+        False, description="Wait in a headless browser too, when the page is solved remotely"
+    )
+
+
+class InterventionSettings(SettingsModel):
+    manual: ManualInterventionSettings = ManualInterventionSettings()
+
+
+class NotificationRule(SettingsModel):
+    enabled: bool = True
+    urgency: Literal["urgent", "normal"] = "normal"
+    cooldown_seconds: float = Field(
+        60.0, ge=0, description="A repeat sent within this time after the last one is dropped"
+    )
+    ttl_seconds: float = Field(3600.0, gt=0, description="A message not sent by then expires")
+
+
+class NotificationEvents(SettingsModel):
+    intervention_required: NotificationRule = NotificationRule(
+        urgency="urgent", cooldown_seconds=900, ttl_seconds=900
+    )
+    run_failed: NotificationRule = NotificationRule(urgency="urgent", ttl_seconds=86400)
+    run_finished: NotificationRule = NotificationRule(ttl_seconds=21600)
+    run_stopped: NotificationRule = NotificationRule(enabled=False)
+    run_started: NotificationRule = NotificationRule(enabled=False)
+
+
+class TelegramChannelSettings(SettingsModel):
+    type: Literal["telegram"]
+    name: str = Field("telegram", pattern=r"^[A-Za-z0-9_.-]+$")
+    enabled: bool = True
+    bot_token_env: str = "TELEGRAM_BOT_TOKEN"
+    chat_id_env: str = "TELEGRAM_CHAT_ID"
+    api_root: str = "https://api.telegram.org"
+    timeout_seconds: float = Field(10.0, gt=0)
+
+
+class EmailChannelSettings(SettingsModel):
+    type: Literal["email"]
+    name: str = Field("email", pattern=r"^[A-Za-z0-9_.-]+$")
+    enabled: bool = True
+    host: str = Field(min_length=1)
+    port: int = Field(587, gt=0)
+    encryption: Literal["starttls", "ssl", "none"] = "starttls"
+    username_env: str | None = None
+    password_env: str | None = None
+    from_address: str = Field(min_length=3)
+    recipients: tuple[str, ...] = Field(min_length=1)
+    subject_prefix: str = "[dailyscraper]"
+    timeout_seconds: float = Field(10.0, gt=0)
+
+
+ChannelSettings = Annotated[
+    TelegramChannelSettings | EmailChannelSettings, Field(discriminator="type")
+]
+
+
+class NotificationsSettings(SettingsModel):
+    """Messages about runs; credentials come from the environment variables named here."""
+
+    enabled: bool = False
+    channels: tuple[ChannelSettings, ...] = ()
+    events: NotificationEvents = NotificationEvents()
+    dispatch_interval_seconds: float = Field(5.0, gt=0)
+    max_attempts: int = Field(5, ge=1)
+    retry_backoff_seconds: float = Field(30.0, ge=0)
+    max_retry_backoff_seconds: float = Field(900.0, ge=0)
+    drain_timeout_seconds: float = Field(15.0, ge=0)
+
+
 class Settings(SettingsModel):
     environment: str
     project_root: Path
@@ -307,6 +383,8 @@ class Settings(SettingsModel):
     proxies: ProxiesSettings = ProxiesSettings()
     proxy_health: ProxyHealthSettings = ProxyHealthSettings()
     proxy_check: ProxyCheckSettings = ProxyCheckSettings()
+    interventions: InterventionSettings = InterventionSettings()
+    notifications: NotificationsSettings = NotificationsSettings()
     scrapers: tuple[ScraperSelection, ...] = ()
 
     def limit_rules(self) -> list[LimitRule]:

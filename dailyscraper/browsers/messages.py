@@ -83,6 +83,27 @@ class TaskFinished(Message):
     outcome: TaskOutcome
 
 
+class InterventionStarted(Message):
+    """The slot holds the page open until a person solves it or the timeout passes."""
+
+    type: Literal["intervention_started"] = "intervention_started"
+    attempt_id: str | None = None
+    kind: str
+    page_type: str
+    url: str | None = None
+    reason: str | None = None
+    timeout_seconds: float
+
+
+class InterventionEnded(Message):
+    type: Literal["intervention_ended"] = "intervention_ended"
+    attempt_id: str | None = None
+    kind: str
+    url: str | None = None
+    result: Literal["resolved", "timeout", "aborted"]
+    seconds: float
+
+
 class SessionBroken(Message):
     """The browser session is unusable; the slot exits after this message."""
 
@@ -99,6 +120,8 @@ FromSlot = Annotated[
     | ItemsCommitted
     | PartitionSealed
     | TaskFinished
+    | InterventionStarted
+    | InterventionEnded
     | SessionBroken,
     Field(discriminator="type"),
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,8 @@ from dailyscraper.domain import (
     Event,
     EventLevel,
     LeaseKey,
+    Notification,
+    NotificationStatus,
     PartitionRef,
     PartitionSeal,
     ProxyHealthState,
@@ -27,6 +30,7 @@ from dailyscraper.domain import (
     TaskOutcome,
     TaskSpec,
     TaskStatus,
+    Urgency,
 )
 from dailyscraper.storage import CommitConflict, StorageError, Store, open_store
 
@@ -194,6 +198,15 @@ def test_events_keep_append_order_and_filter_by_type(store: Store) -> None:
     stored = store.events.list("r1")[0]
     assert stored.level is EventLevel.WARNING
     assert stored.data == {"url": "https://example.com", "items": 3}
+
+
+def test_events_are_read_after_a_sequence_number(store: Store) -> None:
+    store.events.append([event(f"e{n}", "item.failed") for n in range(1, 6)])
+
+    page = store.events.list("r1", after=2, limit=2)
+
+    assert [(e.event_id, e.seq) for e in page] == [("e3", 3), ("e4", 4)]
+    assert store.events.list("r1", after=5) == []
 
 
 def test_repeated_event_is_stored_once(store: Store) -> None:
@@ -447,3 +460,100 @@ def test_proxy_health_starts_fresh_and_updates_atomically(store: Store) -> None:
     assert after.updated_at is not None
     assert store.proxy_health.states("a.ru", ["p1"])["p1"].failures == 2
     assert store.proxy_health.states("b.ru", ["p1"])["p1"].failures == 0
+
+
+def notification(
+    notification_id: str,
+    *,
+    kind: str = "intervention_required",
+    channel: str = "telegram",
+    urgency: Urgency = Urgency.URGENT,
+    cooldown: float = 900,
+    ttl: float = 900,
+) -> Notification:
+    return Notification(
+        notification_id=notification_id,
+        run_id="r1",
+        kind=kind,
+        coalesce_key=f"{kind}:r1",
+        channel=channel,
+        urgency=urgency,
+        title="CAPTCHA",
+        body=notification_id,
+        cooldown_seconds=cooldown,
+        ttl_seconds=ttl,
+    )
+
+
+def test_notifications_and_cursor_are_stored_together(store: Store) -> None:
+    counts = store.notifications.enqueue([notification("n1")], consumer="c", cursor=4)
+    again = store.notifications.enqueue([notification("n1")], consumer="c", cursor=2)
+
+    assert counts == {"created": 1, "merged": 0, "suppressed": 0}
+    assert again["merged"] == 1
+    assert store.notifications.cursor("c") == 4
+    assert store.notifications.cursor("other") == 0
+    (record,) = store.notifications.due()
+    assert (record.status, record.attempts, record.event_count) == (
+        NotificationStatus.PENDING,
+        0,
+        1,
+    )
+
+
+def test_a_pending_message_absorbs_repeats_per_channel(store: Store) -> None:
+    store.notifications.enqueue(
+        [notification("n1"), notification("n2"), notification("n3", channel="email:a@b.c")],
+        consumer="c",
+        cursor=1,
+    )
+
+    records = store.notifications.list("r1")
+    assert [(r.notification_id, r.event_count) for r in records] == [("n1", 2), ("n3", 1)]
+    assert records[0].body == "n1"
+
+
+def test_a_repeat_within_the_cooldown_after_sending_is_suppressed(store: Store) -> None:
+    store.notifications.enqueue([notification("n1")], consumer="c", cursor=1)
+    store.notifications.mark_sent("n1")
+
+    counts = store.notifications.enqueue([notification("n2")], consumer="c", cursor=2)
+    later = store.notifications.enqueue([notification("n3", cooldown=0)], consumer="c", cursor=3)
+
+    assert counts["suppressed"] == 1 and later["created"] == 1
+    sent = store.notifications.list("r1")[0]
+    assert (sent.status, sent.suppressed_count, sent.attempts) == (NotificationStatus.SENT, 1, 1)
+    assert sent.sent_at is not None
+
+
+def test_due_messages_go_urgent_first_and_wait_after_a_retry(store: Store) -> None:
+    store.notifications.enqueue(
+        [
+            notification("n1", kind="run_finished", urgency=Urgency.NORMAL),
+            notification("n2", kind="run_failed"),
+            notification("n3", kind="run_started", urgency=Urgency.NORMAL),
+        ],
+        consumer="c",
+        cursor=3,
+    )
+    store.notifications.reschedule("n3", delay_seconds=60, error="429 too many requests")
+
+    assert [r.notification_id for r in store.notifications.due()] == ["n2", "n1"]
+    assert [r.notification_id for r in store.notifications.due(run_id="r2")] == []
+    retried = store.notifications.list("r1")[2]
+    assert (retried.attempts, retried.last_error) == (1, "429 too many requests")
+
+
+def test_failed_and_expired_messages_are_not_due(store: Store) -> None:
+    store.notifications.enqueue(
+        [notification("n1"), notification("n2", kind="run_failed", ttl=0.001)],
+        consumer="c",
+        cursor=2,
+    )
+    store.notifications.mark_failed("n1", error="403 chat not found")
+    time.sleep(0.01)
+
+    assert store.notifications.expire() == 1
+    assert store.notifications.due() == []
+    statuses = [r.status for r in store.notifications.list("r1")]
+    assert statuses == [NotificationStatus.FAILED, NotificationStatus.EXPIRED]

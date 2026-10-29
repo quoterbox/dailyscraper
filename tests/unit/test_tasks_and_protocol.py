@@ -5,11 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from dailyscraper.browsers import BrowserManager
+from dailyscraper.browsers import BrowserManager, SlotHandle, SlotState
 from dailyscraper.browsers.channel import CommitRejected, SlotChannel, TaskCancelled
 from dailyscraper.browsers.messages import (
     Ack,
     Cancel,
+    InterventionEnded,
+    InterventionStarted,
     ItemsCommitted,
     Progress,
     ProtocolError,
@@ -138,6 +140,13 @@ def test_messages_round_trip_and_check_the_version() -> None:
     assert decode_from_slot(encode(message)) == message
     run = RunTask(task_id="t", attempt_id="t#1", kind=TaskKind.LIST, payload={"link": "x"})
     assert decode_to_slot(encode(run)) == run
+
+    started = InterventionStarted(
+        attempt_id="t#1", kind="captcha", page_type="list", url="x", timeout_seconds=600
+    )
+    ended = InterventionEnded(attempt_id="t#1", kind="captcha", result="timeout", seconds=600)
+    assert decode_from_slot(encode(started)) == started
+    assert decode_from_slot(encode(ended)) == ended
 
     with pytest.raises(ProtocolError):
         decode_to_slot(encode(Shutdown(v=99)))
@@ -310,3 +319,50 @@ def test_one_browser_per_site_and_proxy_by_default(tmp_path) -> None:
     assert not browsers.can_start("ozon_one")
     assert not browsers.can_start("ozon_two")
     assert manager(store, site="wb.ru", max_browsers_per_site_proxy=1).can_start("wb")
+
+
+class IdleProcess:
+    pid = None
+
+    def is_alive(self) -> bool:
+        return True
+
+    def join(self, timeout=None) -> None:
+        pass
+
+
+class ClosedConnection:
+    def close(self) -> None:
+        pass
+
+
+def test_waiting_for_a_person_is_not_a_stall_and_does_not_eat_the_deadline(tmp_path) -> None:
+    now = [0.0]
+    browsers = manager(
+        SQLiteStore(tmp_path / "s.sqlite"), task_deadline_seconds=10, stall_timeout_seconds=30
+    )
+    browsers.clock = lambda: now[0]
+    slot = SlotHandle(
+        "s-1", "s", IdleProcess(), ClosedConnection(), "h:s-1", 0.0, SlotState.BUSY, "t#1"
+    )
+    browsers.slots[slot.slot_id] = slot
+
+    def at(moment: float, message=None) -> list:
+        now[0] = slot.last_message_at = moment
+        if message is not None:
+            browsers._track(slot, message)
+        return browsers._watchdog()
+
+    started = InterventionStarted(
+        attempt_id="t#1", kind="captcha", page_type="list", timeout_seconds=100
+    )
+    assert at(5, started) == [] and slot.state is SlotState.WAITING
+    assert at(50) == []
+    ended = InterventionEnded(attempt_id="t#1", kind="captcha", result="resolved", seconds=55)
+    assert at(60, ended) == [] and slot.state is SlotState.BUSY
+    assert slot.task_started_at == 55
+
+    at(61, started)
+    (exited,) = at(192)
+    assert exited.reason == "intervention did not end"
+    assert exited.category is ErrorCategory.TIMEOUT

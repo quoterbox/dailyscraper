@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 from dailyscraper.actions import ScraperActions
 from dailyscraper.execution.context import PageContext
+from dailyscraper.execution.interventions import InterventionReporter, ManualIntervention
 from dailyscraper.execution.loader import load_package_class
 from dailyscraper.execution.navigator import Navigator
 from dailyscraper.execution.sink import ItemSink
@@ -24,6 +25,7 @@ def open_pipeline(
     pacer: Pacer | None = None,
     snapshots: SnapshotWriter | None = None,
     plan: SessionPlan | None = None,
+    interventions: InterventionReporter | None = None,
 ) -> Iterator[DefaultPipeline]:
     """One browser session running one scraper package in the current process."""
 
@@ -41,6 +43,13 @@ def open_pipeline(
             actions=actions,
             browser=settings.browser,
             pacer=pacer,
+            intervention=ManualIntervention(
+                settings.interventions.manual,
+                headless=settings.browser.playwright.headless,
+                pacer=pacer,
+                reporter=interventions,
+                bring_to_front=browser.page.playwright_page.bring_to_front,
+            ),
         )
         yield pipeline_class(
             PageContext(

@@ -10,6 +10,7 @@ from dailyscraper.storage.sqlite.repositories import (
     SQLiteDeliveries,
     SQLiteEvents,
     SQLiteLeases,
+    SQLiteNotifications,
     SQLitePartitions,
     SQLiteProxyHealth,
     SQLiteRuns,
@@ -40,6 +41,7 @@ class SQLiteStore:
         self.proxy_health = SQLiteProxyHealth(db, clock)
         self.events = SQLiteEvents(db)
         self.deliveries = SQLiteDeliveries(db)
+        self.notifications = SQLiteNotifications(db, clock)
 
     def now(self) -> str:
         return self._clock()

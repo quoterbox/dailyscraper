@@ -17,6 +17,12 @@ from dailyscraper.domain.events import (
     EventLevel,
 )
 from dailyscraper.domain.limits import DIRECT_PROXY, Dimension, LeaseKey, LimitRule, lease_keys
+from dailyscraper.domain.notifications import (
+    Notification,
+    NotificationRecord,
+    NotificationStatus,
+    Urgency,
+)
 from dailyscraper.domain.pages import PageOutcome, PageState, PageType
 from dailyscraper.domain.proxies import HealthStatus, Proxy, ProxyHealthState
 from dailyscraper.domain.runs import DEFAULT_PROJECT_ID, RunRecord, RunStatus, new_run_id
@@ -52,6 +58,9 @@ __all__ = [
     "HealthStatus",
     "LeaseKey",
     "LimitRule",
+    "Notification",
+    "NotificationRecord",
+    "NotificationStatus",
     "PageOutcome",
     "PageState",
     "PageType",
@@ -67,6 +76,7 @@ __all__ = [
     "TaskOutcome",
     "TaskSpec",
     "TaskStatus",
+    "Urgency",
     "lease_keys",
     "new_run_id",
 ]

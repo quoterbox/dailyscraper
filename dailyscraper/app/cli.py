@@ -3,12 +3,19 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import socket
 import sys
 from pathlib import Path
 
 from dailyscraper.app.run_service import RunRequest, RunService
 from dailyscraper.domain import RunStatus
-from dailyscraper.settings import Settings, load_settings
+from dailyscraper.observability.notifications.channels import (
+    Message,
+    Sent,
+    build_channels,
+)
+from dailyscraper.settings import Settings, load_settings, load_variables
+from dailyscraper.settings.environment import resolve_environment_paths
 from dailyscraper.storage import RunLayout, Store, open_store
 
 EXIT_CODES = {
@@ -25,6 +32,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     settings = load_settings(Path.cwd())
+    if args.command == "notifications":
+        return _test_notifications(settings)
     if getattr(args, "headed", False):
         settings = _headed(settings)
     store = open_store(
@@ -105,7 +114,34 @@ def _show(settings: Settings, store: Store, run_id: str) -> int:
         print(f"Error: {run.error}")
     if run.summary:
         print(json.dumps(dict(run.summary), ensure_ascii=False, indent=2))
+    notifications = store.notifications.list(run_id)
+    if notifications:
+        print("Notifications:")
+    for item in notifications:
+        error = f" {item.last_error}" if item.last_error else ""
+        print(f"  {item.kind} via {item.channel}: {item.status.value}{error}")
     return 0
+
+
+def _test_notifications(settings: Settings) -> int:
+    config = settings.notifications
+    variables = load_variables(resolve_environment_paths(settings.project_root))
+    channels = build_channels(config.channels, variables)
+    if not channels:
+        print("No usable notification channel is configured.", file=sys.stderr)
+        return 1
+    if not config.enabled:
+        print("Note: notifications.enabled is false, runs send nothing.")
+    message = Message("Test message", f"dailyscraper on {socket.gethostname()} can reach you.")
+    failed = 0
+    for channel in channels:
+        outcome = channel.send(message)
+        if isinstance(outcome, Sent):
+            print(f"{channel.name}: sent")
+        else:
+            failed += 1
+            print(f"{channel.name}: {outcome.reason}")
+    return 1 if failed else 0
 
 
 def _headed(settings: Settings) -> Settings:
@@ -135,6 +171,11 @@ def _parser() -> argparse.ArgumentParser:
     runs_commands = runs.add_subparsers(dest="runs_command")
     show = runs_commands.add_parser("show", help="details of one run")
     show.add_argument("run_id")
+
+    notifications = commands.add_parser("notifications", help="notification channels")
+    notifications_commands = notifications.add_subparsers(dest="notifications_command")
+    notifications_commands.required = True
+    notifications_commands.add_parser("test", help="send a test message to every channel")
     return parser
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from dailyscraper.domain import Event, EventLevel
@@ -16,6 +17,7 @@ class RunEvents:
         self.store = store
         self.run_id = run_id
         self.project_id = project_id
+        self.listeners: list[Callable[[Event], None]] = []
 
     def emit(
         self,
@@ -39,4 +41,9 @@ class RunEvents:
             self.store.events.append([event])
         except Exception:
             logger.warning("Could not store event %s", type_, exc_info=True)
+        for listener in self.listeners:
+            try:
+                listener(event)
+            except Exception:
+                logger.warning("Event listener failed on %s", type_, exc_info=True)
         return event

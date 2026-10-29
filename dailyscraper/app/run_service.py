@@ -33,6 +33,7 @@ from dailyscraper.domain import (
     new_run_id,
 )
 from dailyscraper.observability import RunEvents, redact
+from dailyscraper.observability.notifications import Notifier, build_notifier
 from dailyscraper.output import (
     Deliverer,
     DeliveryContext,
@@ -59,6 +60,12 @@ from dailyscraper.tasks.retry import RetryPolicy
 logger = logging.getLogger(__name__)
 
 FINAL_ROW_STATUSES = frozenset({"ok", "not_found"})
+INTERVENTION_EVENTS = (
+    "intervention.required",
+    "intervention.resolved",
+    "intervention.timeout",
+    "intervention.aborted",
+)
 
 
 @dataclass(frozen=True)
@@ -165,19 +172,36 @@ class RunService:
             )
         )
         events = RunEvents(self.store, run_id=run_id, project_id=self.settings.project_id)
-        events.emit("run.started", scrapers=list(packages), host=self.host_id)
-        logger.info("Run %s started: %s", run_id, ", ".join(packages))
-
-        execution = _Execution()
+        notifier = self._notifier(run_id, events)
         try:
-            self._execute(run_id, layout, packages, request, execution, events)
-        except KeyboardInterrupt:
-            execution.fail(RunStatus.INTERRUPTED, "interrupted")
-            logger.warning("Run %s interrupted", run_id)
-        except Exception as error:
-            execution.fail(RunStatus.FAILED, f"{type(error).__name__}: {error}")
-            logger.exception("Run %s failed", run_id)
-        return self._finalize(run_id, layout, packages, started, execution, events)
+            events.emit("run.started", scrapers=list(packages), host=self.host_id)
+            logger.info("Run %s started: %s", run_id, ", ".join(packages))
+
+            execution = _Execution()
+            try:
+                self._execute(run_id, layout, packages, request, execution, events)
+            except KeyboardInterrupt:
+                execution.fail(RunStatus.INTERRUPTED, "interrupted")
+                logger.warning("Run %s interrupted", run_id)
+            except Exception as error:
+                execution.fail(RunStatus.FAILED, f"{type(error).__name__}: {error}")
+                logger.exception("Run %s failed", run_id)
+            return self._finalize(run_id, layout, packages, started, execution, events)
+        finally:
+            if notifier is not None:
+                notifier.stop()
+
+    def _notifier(self, run_id: str, events: RunEvents) -> Notifier | None:
+        try:
+            variables = load_variables(resolve_environment_paths(self.settings.project_root))
+            notifier = build_notifier(self.settings.notifications, self.store, run_id, variables)
+        except Exception:
+            logger.exception("Notifications are off for run %s", run_id)
+            return None
+        if notifier is not None:
+            events.listeners.append(notifier.observe)
+            notifier.start()
+        return notifier
 
     def _execute(
         self,
@@ -410,6 +434,9 @@ class RunService:
             status=execution.status.value,
             rows=sum(rows.values()),
             error=execution.error,
+            scrapers={name: rows.get(name, 0) for name in packages},
+            duration_seconds=summary["duration_seconds"],
+            output=str(layout.output),
         )
         logger.info(
             "Run %s finished: %s, %s rows", run_id, execution.status.value, sum(rows.values())
@@ -462,6 +489,10 @@ class RunService:
         tasks = self.store.tasks.list(run_id)
         attempts = self.store.tasks.attempts(run_id)
         final = _final_attempts(attempts)
+        interventions = Counter(
+            (event.scraper, event.type.removeprefix("intervention."))
+            for event in self.store.events.list(run_id, types=INTERVENTION_EVENTS)
+        )
         scrapers: dict[str, Any] = {}
         for name, package in packages.items():
             snapshot = execution.snapshots.get(name)
@@ -472,6 +503,11 @@ class RunService:
                 "statuses": self._statuses(run_id, layout, name, snapshot),
                 "tasks": dict(Counter(task.status.value for task in own)),
                 "attempts": sum(task.attempts for task in own),
+                "interventions": {
+                    result: count
+                    for (scraper, result), count in sorted(interventions.items())
+                    if scraper == name
+                },
                 "proxies": dict(
                     Counter(
                         attempt.proxy_id or DIRECT_PROXY

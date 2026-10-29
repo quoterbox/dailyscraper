@@ -8,7 +8,9 @@ Slots import it by path (``tests.fakes:open_fake``). Its behaviour comes from
 Keys: ``rows``, ``category`` (link failure), ``raise``, ``crash_after`` (exit
 the process after so many committed rows), ``hang`` (stop reporting),
 ``row_delay`` (cancellable pause per row), ``statuses`` (detail status per
-input position). ``proxies`` overrides the behaviour for a proxy id.
+input position), ``captcha`` (a list page shows a challenge that a person solves
+after ``solve_after`` checks, or never when it is ``null``). ``proxies`` overrides
+the behaviour for a proxy id.
 """
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from dailyscraper.domain import ErrorCategory
+from dailyscraper.domain import ErrorCategory, PageOutcome, PageState, PageType
+from dailyscraper.execution.interventions import ManualIntervention
 from dailyscraper.execution.timing import Pacer
 from dailyscraper.page_scrapers import DetailRowResult, ListResult
 from dailyscraper.pipelines import LinkResult, PipelineResult
@@ -29,17 +32,24 @@ OPENER = "tests.fakes:open_fake"
 
 @contextmanager
 def open_fake(
-    package, settings, sink, pacer=None, snapshots=None, plan=None
+    package, settings, sink, pacer=None, snapshots=None, plan=None, interventions=None
 ) -> Iterator[FakePipeline]:
-    yield FakePipeline(package.definition.options.get("fake", {}), sink, pacer or Pacer(), plan)
+    pacer = pacer or Pacer()
+    intervention = ManualIntervention(
+        settings.interventions.manual, headless=False, pacer=pacer, reporter=interventions
+    )
+    yield FakePipeline(package.definition.options.get("fake", {}), sink, pacer, plan, intervention)
 
 
 class FakePipeline:
-    def __init__(self, options: dict[str, Any], sink, pacer: Pacer, plan=None) -> None:
+    def __init__(
+        self, options: dict[str, Any], sink, pacer: Pacer, plan=None, intervention=None
+    ) -> None:
         self.options = options
         self.sink = sink
         self.pacer = pacer
         self.proxy_id = plan.proxy.proxy_id if plan and plan.proxy else "direct"
+        self.intervention = intervention
 
     def behaviour(self) -> dict[str, Any]:
         attempt = (self.sink.attempt_id or "#1").rpartition("#")[2]
@@ -55,6 +65,8 @@ class FakePipeline:
     def run_links(self, links: list[str]) -> PipelineResult:
         behaviour = self.behaviour()
         (link,) = links
+        if "captcha" in behaviour and not self._solved(link, behaviour["captcha"]):
+            return PipelineResult(links=[LinkResult(link, category=ErrorCategory.CAPTCHA)])
         items = []
         for number in range(behaviour.get("rows", 3)):
             item = {
@@ -88,6 +100,20 @@ class FakePipeline:
             results.append(DetailRowResult(item, None, ErrorCategory(status) if status else None))
         self._end(behaviour)
         return PipelineResult(detail_results=results, emitted=len(results))
+
+    def _solved(self, link: str, captcha: dict[str, Any]) -> bool:
+        solve_after = captcha.get("solve_after")
+        checks = 0
+
+        def probe() -> PageOutcome:
+            nonlocal checks
+            checks += 1
+            solved = solve_after is not None and checks >= solve_after
+            state = PageState.READY if solved else PageState.CAPTCHA
+            return PageOutcome(state, PageType.LIST, link, reason=state.value)
+
+        challenge = PageOutcome(PageState.CAPTCHA, PageType.LIST, link, reason="captcha_marker")
+        return self.intervention(challenge, probe).state is PageState.READY
 
     def _row(self, behaviour: dict[str, Any], item, **kwargs) -> None:
         self.pacer.check_interrupted()

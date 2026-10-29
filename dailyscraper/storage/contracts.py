@@ -12,6 +12,8 @@ from dailyscraper.domain import (
     DeliveryRecord,
     Event,
     LeaseKey,
+    Notification,
+    NotificationRecord,
     PartitionRef,
     PartitionSeal,
     PartitionState,
@@ -152,8 +154,15 @@ class LeaseRepository(Protocol):
 class EventLog(Protocol):
     def append(self, events: Sequence[Event]) -> None: ...
 
-    def list(self, run_id: str, *, types: Sequence[str] | None = None) -> list[Event]:
-        """Events in append order."""
+    def list(
+        self,
+        run_id: str,
+        *,
+        types: Sequence[str] | None = None,
+        after: int = 0,
+        limit: int | None = None,
+    ) -> list[Event]:
+        """Events in append order, those with ``seq`` greater than ``after``."""
         ...
 
 
@@ -161,6 +170,39 @@ class DeliveryLog(Protocol):
     def record(self, delivery: DeliveryRecord) -> None: ...
 
     def list(self, run_id: str) -> list[DeliveryRecord]: ...
+
+
+class NotificationOutbox(Protocol):
+    """Messages waiting for their channels; produced from events by a cursor-driven consumer."""
+
+    def enqueue(
+        self, notifications: Sequence[Notification], *, consumer: str, cursor: int
+    ) -> dict[str, int]:
+        """Store messages and move the consumer's cursor in one transaction.
+
+        A message whose ``coalesce_key`` is already pending on the channel is
+        merged into it; one sent within its cooldown is suppressed. Returns the
+        counts of ``created``, ``merged`` and ``suppressed``.
+        """
+        ...
+
+    def cursor(self, consumer: str) -> int: ...
+
+    def due(self, *, run_id: str | None = None, limit: int = 20) -> list[NotificationRecord]:
+        """Pending messages whose time has come, urgent first, then oldest."""
+        ...
+
+    def mark_sent(self, notification_id: str) -> None: ...
+
+    def reschedule(self, notification_id: str, *, delay_seconds: float, error: str) -> None: ...
+
+    def mark_failed(self, notification_id: str, *, error: str) -> None: ...
+
+    def expire(self) -> int:
+        """Give up pending messages past their time to live; returns how many."""
+        ...
+
+    def list(self, run_id: str) -> list[NotificationRecord]: ...
 
 
 class ProxyHealthRepository(Protocol):
@@ -187,6 +229,7 @@ class Store(Protocol):
     leases: LeaseRepository
     events: EventLog
     deliveries: DeliveryLog
+    notifications: NotificationOutbox
 
     def now(self) -> str:
         """Current time from the storage's clock, ISO 8601 in UTC."""

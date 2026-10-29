@@ -13,6 +13,8 @@ import psutil
 
 from dailyscraper.browsers.messages import (
     Cancel,
+    InterventionEnded,
+    InterventionStarted,
     Message,
     RunTask,
     SessionBroken,
@@ -49,6 +51,7 @@ class SlotState(StrEnum):
     STARTING = "starting"
     IDLE = "idle"
     BUSY = "busy"
+    WAITING = "waiting"
     STOPPING = "stopping"
 
 
@@ -67,6 +70,8 @@ class SlotHandle:
     failure: str | None = None
     proxy: Proxy | None = None
     tasks_done: int = 0
+    waiting_since: float = 0.0
+    waiting_until: float = 0.0
 
     @property
     def proxy_id(self) -> str:
@@ -292,10 +297,20 @@ class BrowserManager:
     def _track(self, slot: SlotHandle, message: Message) -> None:
         if isinstance(message, SlotReady) and slot.state is SlotState.STARTING:
             slot.state = SlotState.IDLE
+        elif isinstance(message, InterventionStarted) and slot.state is SlotState.BUSY:
+            slot.state = SlotState.WAITING
+            slot.waiting_since = self.clock()
+            slot.waiting_until = (
+                slot.waiting_since + message.timeout_seconds + self.runtime.stall_timeout_seconds
+            )
+        elif isinstance(message, InterventionEnded) and slot.state is SlotState.WAITING:
+            slot.state = SlotState.BUSY
+            # Time spent waiting for a person does not count against the task deadline.
+            slot.task_started_at += self.clock() - slot.waiting_since
         elif isinstance(message, TaskFinished) and message.attempt_id == slot.attempt_id:
             slot.attempt_id = None
             slot.tasks_done += 1
-            if slot.state is SlotState.BUSY:
+            if slot.state in {SlotState.BUSY, SlotState.WAITING}:
                 slot.state = SlotState.IDLE
             if self._worn_out(slot):
                 self.retire(slot.slot_id)
@@ -347,6 +362,10 @@ class BrowserManager:
                 late = now - slot.task_started_at > runtime.task_deadline_seconds
                 overdue = stalled or late
                 reason = "no progress from the slot" if stalled else "task deadline exceeded"
+            elif slot.state is SlotState.WAITING:
+                stalled = now - slot.last_message_at > runtime.stall_timeout_seconds
+                overdue = stalled or now > slot.waiting_until
+                reason = "no progress from the slot" if stalled else "intervention did not end"
             else:
                 overdue = False
                 reason = ""

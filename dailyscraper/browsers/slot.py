@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict
 
 from dailyscraper.browsers.channel import SlotChannel, TaskCancelled
 from dailyscraper.browsers.messages import (
+    InterventionEnded,
+    InterventionStarted,
     RunTask,
     SessionBroken,
     Shutdown,
@@ -27,6 +29,7 @@ from dailyscraper.browsers.messages import (
 )
 from dailyscraper.detection import classify_error
 from dailyscraper.domain import AttemptStatus, ErrorCategory, Proxy, TaskKind, TaskOutcome
+from dailyscraper.execution.interventions import InterventionNotice, InterventionResult
 from dailyscraper.execution.partitions import ItemIdentity, PartitionSink, PartitionWriter
 from dailyscraper.execution.snapshots import SnapshotWriter
 from dailyscraper.execution.timing import Pacer
@@ -64,6 +67,38 @@ class SlotConfig(BaseModel):
     proxy: Proxy | None = None
     profile_dir: Path | None = None
     extension_dir: Path | None = None
+
+
+class ChannelInterventions:
+    """Tells the parent that the slot waits for a person, so it is not taken for stalled."""
+
+    def __init__(self, channel: SlotChannel) -> None:
+        self.channel = channel
+
+    def started(self, notice: InterventionNotice) -> None:
+        self.channel.send(
+            InterventionStarted(
+                attempt_id=self.channel.attempt_id,
+                kind=notice.kind,
+                page_type=notice.page_type.value,
+                url=notice.url,
+                reason=notice.reason,
+                timeout_seconds=notice.timeout_seconds,
+            )
+        )
+
+    def ended(
+        self, notice: InterventionNotice, *, result: InterventionResult, seconds: float
+    ) -> None:
+        self.channel.send(
+            InterventionEnded(
+                attempt_id=self.channel.attempt_id,
+                kind=notice.kind,
+                url=notice.url,
+                result=result,
+                seconds=seconds,
+            )
+        )
 
 
 def slot_main(config_json: str, connection: Connection) -> None:
@@ -115,6 +150,7 @@ def slot_main(config_json: str, connection: Connection) -> None:
             pacer=Pacer(channel.check_interrupted),
             snapshots=snapshots,
             plan=plan,
+            interventions=ChannelInterventions(channel),
         ) as pipeline:
             channel.send(SlotReady(pid=os.getpid()))
             _serve(channel, pipeline, sink, config)

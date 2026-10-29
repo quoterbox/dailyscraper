@@ -183,10 +183,42 @@ CREATE TABLE proxy_health (
 );
 """
 
+NOTIFICATIONS = """
+CREATE TABLE notifications (
+    notification_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    coalesce_key TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    urgency TEXT NOT NULL,
+    status TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 1,
+    suppressed_count INTEGER NOT NULL DEFAULT 0,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    next_attempt_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    sent_at TEXT,
+    last_error TEXT
+);
+CREATE INDEX notifications_due ON notifications(status, next_attempt_at);
+CREATE INDEX notifications_by_key ON notifications(coalesce_key, channel, status);
+CREATE INDEX notifications_by_run ON notifications(run_id, created_at);
+
+CREATE TABLE consumer_cursors (
+    consumer TEXT PRIMARY KEY,
+    position INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline", BASELINE),
     Migration(2, "tasks_attempts_commands_leases", TASKS),
     Migration(3, "proxy_health", PROXY_HEALTH),
+    Migration(4, "notifications", NOTIFICATIONS),
 )
 
 
