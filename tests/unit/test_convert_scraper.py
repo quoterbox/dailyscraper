@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from dailyscraper.schema import ScraperDefinition
-from tools.convert_scraper import UnsupportedFormatError, convert, convert_package
+from tools.convert_scraper import UnsupportedFormatError, _repeats, convert, convert_package
 
 
 @pytest.mark.parametrize("name", ["controlled_catalog", "controlled_details"])
@@ -57,6 +57,25 @@ def test_selectors_keep_xpath_priority_fallbacks_and_value_prepare() -> None:
     ScraperDefinition.model_validate(converted)
 
 
+@pytest.mark.parametrize(
+    ("paginator", "expected"),
+    [
+        ({}, {"enabled": False}),
+        ({"wait_for_changing_content": False, "max_the_same_content_pages": 3}, {"enabled": False}),
+        (
+            {"wait_for_changing_content": True, "max_the_same_content_pages": 2},
+            {"match": "any", "confirmations": 2},
+        ),
+        (
+            {"wait_for_changing_content": True, "stop_if_all_items_the_same": True},
+            {"match": "all"},
+        ),
+    ],
+)
+def test_repeat_settings_keep_the_previous_behaviour(paginator, expected) -> None:
+    assert _repeats(paginator) == expected
+
+
 def test_list_templates_map_item_samples_pagination_and_timing() -> None:
     converted, warnings = convert(
         "shop",
@@ -91,7 +110,7 @@ def test_list_templates_map_item_samples_pagination_and_timing() -> None:
     assert page["templates"][0]["item"] == {"xpath": "//div[@id='grid']/div"}
     assert page["templates"][0]["next_page"] == {"css": "a.next"}
     assert page["pagination"]["url_template"] == "{url}?page={page}"
-    assert page["pagination"]["stop_if_all_items_same"] is True
+    assert page["pagination"]["repeats"] == {"enabled": False}
     assert page["waits"] == {"item_body": 3}
     assert page["scroll"] == {"delta_y": [10, 20], "enabled": True}
     assert warnings == []

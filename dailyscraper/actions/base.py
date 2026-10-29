@@ -83,6 +83,10 @@ class ScraperActions:
     def collect_from_input(self, items: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         return None
 
+    def item_key(self, item: dict[str, Any]) -> str | None:
+        """The item's own key for telling repeated catalog pages apart, e.g. a product id."""
+        return None
+
     def discover_last_page(self, url: str) -> int | None:
         """The link's last catalog page found by the package itself, e.g. from an API."""
         return None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from dailyscraper.pages.base import DelayRange, FrozenModel, Seconds
@@ -18,14 +20,23 @@ class ListTemplate(FrozenModel):
     next_page: Selector | None = None
 
 
+class Repeats(FrozenModel):
+    """When a catalog page counts as a repeat of pages already read."""
+
+    enabled: bool = True
+    match: Literal["all", "any", "share"] = "all"
+    min_share: float = Field(0.8, gt=0, le=1)
+    compare_with: Literal["previous", "seen"] = "previous"
+    confirmations: int = Field(2, ge=1)
+    key_fields: tuple[str, ...] = ()
+
+
 class Pagination(FrozenModel):
     start_page: int = Field(1, ge=1)
     last_page: int = Field(0, ge=0, description="0 means until the site has no next page")
     url_template: str | None = None
     infinity_loading: bool = False
-    wait_for_changing_content: bool = True
-    max_same_content_pages: int = Field(1, ge=1)
-    stop_if_all_items_same: bool = False
+    repeats: Repeats = Repeats()
 
     @model_validator(mode="after")
     def _consistent(self) -> Pagination:

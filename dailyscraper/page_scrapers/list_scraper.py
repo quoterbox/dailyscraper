@@ -8,7 +8,9 @@ from typing import Any
 
 from dailyscraper.domain import PageOutcome, PageType
 from dailyscraper.execution.context import PageContext
+from dailyscraper.execution.partitions import ItemIdentity
 from dailyscraper.page_scrapers.extraction import is_empty_value, read_value
+from dailyscraper.page_scrapers.repeats import RepeatDetector
 from dailyscraper.pages import CompiledListTemplate, ListPage, compile_list_template
 from dailyscraper.transport import Element
 
@@ -43,6 +45,12 @@ class ListPageScraper:
         self._on_page: Callable[[list[Item]], None] | None = None
         self._range: PageRange | None = None
         self._max_pages = 0
+        self._identity = ItemIdentity(
+            fields=page.pagination.repeats.key_fields, link_field=page.detail_link_field
+        )
+
+    def item_key(self, item: Item) -> str:
+        return self.ctx.actions.item_key(item) or self._identity.key(item)
 
     def page_url(self, link: str, page_num: int) -> str:
         template = self.page.pagination.url_template
@@ -94,8 +102,8 @@ class ListPageScraper:
         pagination = self.page.pagination
         first, last = self._range or (pagination.start_page, pagination.last_page)
         page_num = first if pagination.url_template else 1
-        previous: list[Item] = []
-        same_content = 0
+        detector = RepeatDetector(pagination.repeats, self.item_key)
+        repeats = 0
         while True:
             result.last_outcome = outcome
             if not outcome.is_ready:
@@ -109,21 +117,24 @@ class ListPageScraper:
                 page_items = self._extract(
                     self.ctx.finder.find_all(template.items.item, self.page.waits.item), template
                 )
-                if (
-                    pagination.wait_for_changing_content
-                    and previous
-                    and _same_items(previous, page_items, pagination.stop_if_all_items_same)
-                ):
-                    same_content += 1
-                    logger.warning("Page %s repeats the previous page (%s)", page_num, same_content)
-                    if same_content >= pagination.max_same_content_pages:
-                        result.stop_reason = "same_content"
+                repeat = detector.check(page_items)
+                if repeat.repeated:
+                    repeats += 1
+                    logger.warning(
+                        "Page %s %s (%s/%s)",
+                        page_num,
+                        repeat.reason,
+                        repeats,
+                        pagination.repeats.confirmations,
+                    )
+                    if repeats >= pagination.repeats.confirmations:
+                        result.stop_reason = f"repeated_page:{repeat.reason}"
                         return
                     self.ctx.pacer.delay(self.page.delays.before_next_page)
-                    outcome = self.ctx.navigator.wait(PageType.LIST, allow_reload=False)
+                    outcome = self._recheck(link, page_num)
                     continue
-                same_content = 0
-                previous = page_items
+                repeats = 0
+                detector.remember(page_num, page_items)
                 result.visits.append(ListPageVisit(page_num, outcome.url, len(page_items), outcome))
                 if not self._accept(page_items, link, result):
                     result.stop_reason = "last_item"
@@ -169,7 +180,7 @@ class ListPageScraper:
                     return
             else:
                 same_content += 1
-                if same_content >= self.page.pagination.max_same_content_pages:
+                if same_content >= self.page.pagination.repeats.confirmations:
                     result.stop_reason = "no_more_items"
                     return
             if template.template.next_page is not None:
@@ -185,6 +196,15 @@ class ListPageScraper:
             else:
                 self.ctx.page.scroll_to_bottom()
             self.ctx.pacer.delay(self.page.delays.before_next_page)
+
+    def _recheck(self, link: str, page_num: int) -> PageOutcome:
+        # A page opened by its address is opened again; after a click the
+        # site may still be switching, so the same page is waited for.
+        if self.page.pagination.url_template is not None:
+            return self.ctx.navigator.open(
+                self.page_url(link, page_num), PageType.LIST, allow_reload=False
+            )
+        return self.ctx.navigator.wait(PageType.LIST, allow_reload=False)
 
     def _open_page(
         self, template: CompiledListTemplate, link: str, page_num: int
@@ -273,12 +293,3 @@ class ListPageScraper:
         scroll = self.page.scroll
         element.scroll_into_view()
         self.ctx.page.scroll_by(random.randint(*scroll.delta_x), random.randint(*scroll.delta_y))
-
-
-def _same_items(previous: list[Item], current: list[Item], only_if_all_same: bool) -> bool:
-    if not previous or not current:
-        return False
-    different = sum(1 for item in current if item not in previous)
-    if different == 0:
-        return True
-    return different < len(current) and not only_if_all_same

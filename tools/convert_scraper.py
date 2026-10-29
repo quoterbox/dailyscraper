@@ -394,6 +394,19 @@ def _scroll(scroll_options: dict[str, Any], enabled_key: str) -> dict[str, Any]:
     return scroll if scroll.get("enabled") or any(v != [0, 0] for v in scroll.values()) else {}
 
 
+def _repeats(paginator: dict[str, Any]) -> dict[str, Any]:
+    # The previous format checked repeats only when asked and, unless told
+    # otherwise, took one shared item as a repeat.
+    if not paginator.get("wait_for_changing_content"):
+        return {"enabled": False}
+    repeats: dict[str, Any] = {
+        "match": "all" if paginator.get("stop_if_all_items_the_same") else "any"
+    }
+    if "max_the_same_content_pages" in paginator:
+        repeats["confirmations"] = paginator["max_the_same_content_pages"]
+    return repeats
+
+
 def _convert_list_page(
     templates: list[dict[str, Any]],
     paginator: dict[str, Any],
@@ -445,12 +458,10 @@ def _convert_list_page(
         ("start_page", "start_page"),
         ("last_page", "last_page"),
         ("infinity_loading", "infinity_loading"),
-        ("wait_for_changing_content", "wait_for_changing_content"),
-        ("max_the_same_content_pages", "max_same_content_pages"),
-        ("stop_if_all_items_the_same", "stop_if_all_items_same"),
     ):
         if source in paginator:
             pagination[target] = paginator[source]
+    pagination["repeats"] = _repeats(paginator)
     by_url = paginator.get("by_url") or {}
     if by_url.get("change_by_url") and by_url.get("template"):
         pagination["url_template"] = by_url["template"].replace("{URL}", "{url}")

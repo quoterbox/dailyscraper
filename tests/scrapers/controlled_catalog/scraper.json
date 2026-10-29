@@ -70,8 +70,10 @@
                 "start_page": 1,
                 "last_page": 3,
                 "infinity_loading": false,
-                "wait_for_changing_content": true,
-                "max_same_content_pages": 1,
+                "repeats": {
+                    "match": "any",
+                    "confirmations": 1
+                },
                 "url_template": "{url}page/{page}/"
             },
             "save_start_link": true,

@@ -8,6 +8,7 @@ from dailyscraper.page_scrapers.list_scraper import (
     ListResult,
     PageRange,
 )
+from dailyscraper.page_scrapers.repeats import ItemKey, RepeatCheck, RepeatDetector
 
 __all__ = [
     "AuthPageScraper",
@@ -16,5 +17,8 @@ __all__ = [
     "ListPageScraper",
     "ListPageVisit",
     "ListResult",
+    "ItemKey",
     "PageRange",
+    "RepeatCheck",
+    "RepeatDetector",
 ]

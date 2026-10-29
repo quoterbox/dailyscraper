@@ -22,6 +22,7 @@ from dailyscraper.page_scrapers import (
     ListPageScraper,
     ListResult,
     PageRange,
+    RepeatDetector,
 )
 from dailyscraper.schema.scraper import HealthCheck
 
@@ -173,30 +174,36 @@ class DefaultPipeline:
             raise ValueError("discovery needs pagination.url_template")
         settings = self.ctx.definition.discovery
         saved: list[int] = []
-        seen: dict[tuple, int] = {}
         emitted_before = self._emitted
+        rules = pagination.repeats
+        if rules.match == "any":
+            # Against every page read, one shared promoted item is no sign of the end.
+            rules = rules.model_copy(update={"match": "all"})
+        # Pages are visited out of order, so a repeat may be of any page read.
+        repeats = RepeatDetector(rules, self.list.item_key, compare_with="seen")
+        # Details of saved items would make discovery as long as the whole link.
+        keep = settings.save_items and self.detail is None
 
-        def save(page: int) -> tuple[PageKind, str] | None:
+        def read(page: int) -> tuple[PageKind, str] | None:
             items = self.list.read_page(link)
             if not items:
                 return PageKind.UNKNOWN, "no_items_extracted"
             # Some shops answer a page past the end with the last real page.
-            signature = tuple(sorted(str(sorted(item.items())) for item in items))
-            if signature in seen:
-                return PageKind.EMPTY, f"repeats_page_{seen[signature]}"
-            seen[signature] = page
-            self._emit(items)
-            saved.append(page)
+            repeat = repeats.check(items)
+            if repeat.repeated:
+                return PageKind.EMPTY, repeat.reason
+            repeats.remember(page, items)
+            if keep:
+                self._emit(items)
+                saved.append(page)
             return None
 
-        # Details of saved items would make discovery as long as the whole link.
-        keep = settings.save_items and self.detail is None
         checker = PageChecker(
             self.ctx.navigator,
             lambda page: self.list.page_url(link, page),
             settings,
             self.ctx.pacer,
-            read_items=save if keep else None,
+            read_items=read if keep or pagination.repeats.enabled else None,
         )
         result = search_last_page(checker, start, limit)
         return replace(

@@ -18,7 +18,7 @@ from dailyscraper.pages.detail_page import (
     PropertySpec,
     property_output_field,
 )
-from dailyscraper.pages.list_page import ListPage, ListTemplate, Pagination
+from dailyscraper.pages.list_page import ListPage, ListTemplate, Pagination, Repeats
 from dailyscraper.pages.selectors import Locator, PrepareMode, Selector, SelectorKind, ValuePrepare
 from dailyscraper.pages.state import PageStateRules
 from dailyscraper.pages.xpath import XPathError, derive_item_xpath, relative_to_item
@@ -42,6 +42,7 @@ __all__ = [
     "PrepareMode",
     "PropertyGroup",
     "PropertySpec",
+    "Repeats",
     "Scroll",
     "Selector",
     "SelectorKind",

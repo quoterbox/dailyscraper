@@ -10,7 +10,6 @@ from dailyscraper.execution.loader import PackageCodeError, load_package_class
 from dailyscraper.execution.sink import JsonLinesSink
 from dailyscraper.execution.timing import Pacer
 from dailyscraper.page_scrapers.extraction import clean_text, read_value
-from dailyscraper.page_scrapers.list_scraper import _same_items
 from dailyscraper.pages import Selector
 from dailyscraper.pipelines import DefaultPipeline
 from dailyscraper.schema import ScraperPackage, load_scraper_package
@@ -67,22 +66,6 @@ def test_field_values_are_read_prepared_and_cleaned(element, selector, link, exp
 
 def test_clean_text_collapses_whitespace_instead_of_gluing_lines() -> None:
     assert clean_text("Line one\r\nLine two\t end") == "Line one Line two end"
-
-
-@pytest.mark.parametrize(
-    ("previous", "current", "only_if_all_same", "expected"),
-    [
-        ([{"a": 1}, {"a": 2}], [{"a": 1}, {"a": 2}], False, True),
-        ([{"a": 1}, {"a": 2}], [{"a": 2}, {"a": 3}], False, True),
-        ([{"a": 1}, {"a": 2}], [{"a": 2}, {"a": 3}], True, False),
-        ([{"a": 1}], [{"a": 3}, {"a": 4}], False, False),
-        ([], [{"a": 1}], False, False),
-    ],
-)
-def test_same_content_rule_matches_the_previous_implementation(
-    previous, current, only_if_all_same, expected
-) -> None:
-    assert _same_items(previous, current, only_if_all_same) is expected
 
 
 def test_pacer_checks_for_interruption_while_sleeping() -> None:
