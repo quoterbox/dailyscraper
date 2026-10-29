@@ -6,7 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from dailyscraper.detection import category_for_state
-from dailyscraper.domain import ErrorCategory, PageOutcome, PageType
+from dailyscraper.domain import ErrorCategory, PageError, PageOutcome, PageType
 from dailyscraper.execution.context import PageContext
 from dailyscraper.execution.discovery import (
     PageChecker,
@@ -85,9 +85,8 @@ class DefaultPipeline:
 
         ``positions`` are the rows' positions in the whole input when ``rows`` is
         a planned part of it; then ``start_item``/``last_item`` are already applied.
+        Without a detail page the package collects each row in ``collect_from_input``.
         """
-        if self.detail is None:
-            raise ValueError(f"{self.ctx.definition.name} has no detail page for input rows")
         result = PipelineResult()
         self.ctx.actions.before_run()
         emitted_before = self._emitted
@@ -108,28 +107,31 @@ class DefaultPipeline:
         navigator = self.ctx.navigator
         result = LinkResult(link)
         emit_pages = self._emit if self.detail is None else None
-        collected = actions.collect_list(link)
+        url = self.list.start_url(link, pages)
+        navigation = navigator.navigate(url)
+        if not navigation.ok:
+            result.outcome = navigator.failed_open(url, PageType.LIST, navigation.error)
+            result.category = category_for_state(result.outcome.state)
+            self._snapshot("list", result.outcome)
+            return result
+        self._login(link)
+        actions.after_first_open(link)
+        result.outcome = navigator.wait(PageType.LIST)
+        if not result.outcome.is_ready:
+            result.category = category_for_state(result.outcome.state, result.outcome.http_status)
+            self._snapshot("list", result.outcome)
+            return result
+        pagination = self.list.page.pagination
+        if pages is None and max_pages:
+            pages = (pagination.start_page, pagination.start_page + max_pages - 1)
+        collected = actions.collect_list(
+            link, pages or (pagination.start_page, pagination.last_page)
+        )
         if collected is not None:
             result.list_result = ListResult(items=list(collected), stop_reason="collected_by_hook")
             if emit_pages is not None:
                 emit_pages(result.list_result.items)
         else:
-            url = self.list.start_url(link, pages)
-            navigation = navigator.navigate(url)
-            if not navigation.ok:
-                result.outcome = navigator.failed_open(url, PageType.LIST, navigation.error)
-                result.category = category_for_state(result.outcome.state)
-                self._snapshot("list", result.outcome)
-                return result
-            self._login(link)
-            actions.after_first_open(link)
-            result.outcome = navigator.wait(PageType.LIST)
-            if not result.outcome.is_ready:
-                result.category = category_for_state(
-                    result.outcome.state, result.outcome.http_status
-                )
-                self._snapshot("list", result.outcome)
-                return result
             actions.before_list(link)
             result.list_result = self.list.run(
                 link, result.outcome, on_page=emit_pages, pages=pages, max_pages=max_pages
@@ -165,13 +167,15 @@ class DefaultPipeline:
         pagination = self.list.page.pagination
         start = pagination.start_page
         limit = pagination.last_page or self.ctx.definition.discovery.max_page
-        own = self.ctx.actions.discover_last_page(link)
+        own = self.ctx.actions.discover_last_page(link, start, limit)
         if own is not None:
             if own < start:
                 return SearchResult("empty", None, "found_by_hook")
             return SearchResult("ok", min(own, limit), "found_by_hook")
         if pagination.url_template is None:
-            raise ValueError("discovery needs pagination.url_template")
+            raise ValueError(
+                "discovery needs pagination.url_template or the package's discover_last_page"
+            )
         settings = self.ctx.definition.discovery
         saved: list[int] = []
         emitted_before = self._emitted
@@ -204,6 +208,7 @@ class DefaultPipeline:
             settings,
             self.ctx.pacer,
             read_items=read if keep or pagination.repeats.enabled else None,
+            after_open=self.ctx.actions.after_first_open,
         )
         result = search_last_page(checker, start, limit)
         return replace(
@@ -237,6 +242,9 @@ class DefaultPipeline:
             stage="detail",
         )
 
+    def run_warnings(self) -> list[Row]:
+        return self.ctx.actions.run_warnings()
+
     def collect(self) -> _Capture:
         """Rows emitted inside the block are kept here instead of the sink (health probes)."""
         return _Capture(self)
@@ -248,6 +256,8 @@ class DefaultPipeline:
         input_positions: bool = False,
         positions: Sequence[int] | None = None,
     ) -> list[DetailRowResult]:
+        if self.detail is None:
+            return self._collect_rows(rows, input_positions=input_positions, positions=positions)
         page = self.detail.page
         results = []
         numbered = zip(positions, rows, strict=True) if positions is not None else None
@@ -270,6 +280,38 @@ class DefaultPipeline:
             self.ctx.pacer.delay(page.delays.between_items)
         return results
 
+    def _collect_rows(
+        self,
+        rows: list[Row],
+        *,
+        input_positions: bool,
+        positions: Sequence[int] | None,
+    ) -> list[DetailRowResult]:
+        actions = self.ctx.actions
+        results = []
+        for position, row in zip(positions or range(1, len(rows) + 1), rows, strict=True):
+            self.ctx.pacer.check_interrupted()
+            try:
+                items = actions.collect_from_input(row)
+            except PageError as error:
+                logger.warning("Input row %s: %s", position, error)
+                items, category = [row], error.category
+            else:
+                if items is None:
+                    raise ValueError(
+                        f"{self.ctx.definition.name} has no detail page and its actions"
+                        " do not collect_from_input"
+                    )
+                category = None if items else ErrorCategory.NOT_FOUND
+                items = items or [row]
+            results.append(DetailRowResult(items[0], None, category))
+            self._emit(
+                items,
+                input_row=position if input_positions else None,
+                status=category.value if category else None,
+            )
+        return results
+
     def _login(self, link: str) -> None:
         if self.auth is None:
             return
@@ -286,11 +328,14 @@ class DefaultPipeline:
     def _emit(
         self, rows: list[Row], *, input_row: int | None = None, status: str | None = None
     ) -> None:
-        for row in self.ctx.actions.prepare_output(rows):
+        for part, row in enumerate(self.ctx.actions.prepare_output(rows)):
             if self._captured is not None:
                 self._captured.append(row)
                 continue
-            self.ctx.sink.emit(row, input_row=input_row, status=status)
+            if input_row is None:
+                self.ctx.sink.emit(row, status=status)
+            else:
+                self.ctx.sink.emit(row, input_row=input_row, status=status, part=part)
             self._emitted += 1
 
 

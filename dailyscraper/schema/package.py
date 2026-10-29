@@ -11,11 +11,15 @@ from pydantic import ValidationError
 from dailyscraper.pages import TemplateError, compile_detail_template, compile_list_template
 from dailyscraper.schema.scraper import SCRAPER_SCHEMA_VERSION, ScraperDefinition
 from dailyscraper.settings.interpolation import MissingVariableError, interpolate_env
+from dailyscraper.settings.sources import deep_merge
 
 SCRAPER_FILE = "scraper.json"
+# Local changes for trial runs (fewer links, fewer pages), kept out of the packages' git.
+LOCAL_SCRAPER_FILE = "scraper.local.json"
 PIPELINE_FILE = "pipeline.py"
 ACTIONS_FILE = "actions.py"
 VERSIONED_SUFFIXES = (".json", ".py")
+SHARED_DIRECTORY = "common"
 
 
 class ScraperPackageError(ValueError):
@@ -50,6 +54,15 @@ def load_scraper_package(root: Path, *, variables: Mapping[str, str]) -> Scraper
         raise ScraperPackageError(f"{source} does not exist") from error
     except json.JSONDecodeError as error:
         raise ScraperPackageError(f"{source} is not valid JSON: {error}") from error
+    local = root / LOCAL_SCRAPER_FILE
+    if local.is_file() and isinstance(raw, dict):
+        try:
+            changes = json.loads(local.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ScraperPackageError(f"{local} is not valid JSON: {error}") from error
+        if not isinstance(changes, dict):
+            raise ScraperPackageError(f"{local} must contain a JSON object")
+        deep_merge(raw, changes)
 
     if not isinstance(raw, dict) or raw.get("schema_version") != SCRAPER_SCHEMA_VERSION:
         raise ScraperPackageError(
@@ -72,15 +85,21 @@ def load_scraper_package(root: Path, *, variables: Mapping[str, str]) -> Scraper
 
 
 def package_version(root: Path) -> str:
-    """Content hash of the package's ``.json`` and ``.py`` files, independent of their location."""
+    """Content hash of the package's ``.json`` and ``.py`` files and of the shared
+    ``common/`` code next to it, independent of their location.
+    """
+    root = Path(root)
     digest = hashlib.sha256()
+    shared = root.parent / SHARED_DIRECTORY
     files = sorted(
         path
-        for path in Path(root).rglob("*")
+        for base in (root, shared)
+        for path in base.rglob("*")
         if path.is_file() and path.suffix in VERSIONED_SUFFIXES and "__pycache__" not in path.parts
     )
     for path in files:
-        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        name = path.relative_to(root if path.is_relative_to(root) else root.parent)
+        digest.update(name.as_posix().encode("utf-8") + b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
     return digest.hexdigest()[:16]
 

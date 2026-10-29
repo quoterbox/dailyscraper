@@ -22,7 +22,8 @@ from dailyscraper.execution.health import evaluate
 from dailyscraper.schema import ScraperDefinition, ScraperPackage
 from dailyscraper.schema.scraper import Discovery, HealthCheck
 from dailyscraper.tasks.discovery import after_discovery
-from dailyscraper.tasks.planner import PlanningError, page_count_key, page_ranges, plan_tasks
+from dailyscraper.tasks.planner import page_count_key, page_ranges, plan_tasks
+from dailyscraper.transport.page import Navigation
 from dailyscraper.transport.profiles import ProfileState
 
 
@@ -72,9 +73,9 @@ class Navigator:
         self.opened: list[str] = []
         self.page = type("Page", (), {"body_text": lambda _self: body})()
 
-    def open(self, url, page_type, allow_reload=True) -> PageOutcome:
+    def navigate(self, url) -> Navigation:
         self.opened.append(url)
-        return self._next(url)
+        return Navigation(url, url, 200)
 
     def wait(self, page_type, allow_reload=True) -> PageOutcome:
         return self._next(self.opened[-1])
@@ -168,11 +169,11 @@ def test_planner_splits_a_known_page_range(tmp_path: Path) -> None:
 
     assert [spec.payload["pages"] for spec in specs[:3]] == [[1, 2], [3, 4], [5, 5]]
     assert len(specs) == 9 and len({spec.task_id for spec in specs}) == 9
+    # The package's own discover_last_page may search without an address template.
     without_template = package(
         tmp_path, discovery__enabled=True, pages__list__pagination__url_template=None
     )
-    with pytest.raises(PlanningError):
-        plan_tasks("r1", without_template)
+    assert {spec.kind for spec in plan_tasks("r1", without_template)} == {TaskKind.DISCOVER}
 
 
 def discover_task(links: list[str]) -> Task:

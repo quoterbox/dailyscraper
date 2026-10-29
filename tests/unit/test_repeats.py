@@ -14,6 +14,7 @@ from dailyscraper.page_scrapers import ListPageScraper, RepeatDetector
 from dailyscraper.pages import ListPage, Repeats
 from dailyscraper.pipelines import DefaultPipeline
 from dailyscraper.schema import ScraperDefinition
+from dailyscraper.transport.page import Navigation
 
 
 def names(*values: str) -> list[dict[str, Any]]:
@@ -178,8 +179,12 @@ class Navigator:
         self.shop = shop
 
     def open(self, url: str, page_type, allow_reload: bool = True) -> PageOutcome:
-        self.shop.open(int(url.rsplit("=", 1)[1]))
+        self.navigate(url)
         return self._outcome(url)
+
+    def navigate(self, url: str) -> Navigation:
+        self.shop.open(int(url.rsplit("=", 1)[1]))
+        return Navigation(url, url, 200)
 
     def wait(self, page_type, allow_reload: bool = True) -> PageOutcome:
         self.shop.settle()

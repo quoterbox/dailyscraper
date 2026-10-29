@@ -18,3 +18,14 @@ class ErrorCategory(StrEnum):
     FILESYSTEM = "filesystem"
     CANCELLED = "cancelled"
     INTERNAL = "internal"
+
+
+class PageError(RuntimeError):
+    """A problem a package's hook found on the page, handled like the same category found by
+    the framework: a block or a captcha moves the task to another proxy, ``not_found`` is final.
+    """
+
+    def __init__(self, category: ErrorCategory, reason: str) -> None:
+        super().__init__(f"{category.value}: {reason}")
+        self.category = category
+        self.reason = reason

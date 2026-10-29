@@ -30,7 +30,8 @@ def plan_tasks(
 
     Links become ``discover`` tasks when discovery is on, list tasks over page
     ranges when the last page is configured, otherwise one list task each;
-    input rows become detail tasks over chunks of the snapshot.
+    input rows become detail tasks over chunks of the snapshot (without a
+    detail page the package collects each row itself).
     """
     probe = _probe(run_id, package, snapshot, max_attempts)
     if snapshot is not None:
@@ -136,10 +137,8 @@ def _detail_tasks(
 ) -> list[TaskSpec]:
     name = package.name
     detail = package.definition.pages.detail
-    if detail is None:
-        raise PlanningError(f"{name} has no detail page for input rows")
-    first = detail.start_item
-    last = min(snapshot.rows, detail.last_item or snapshot.rows)
+    first = detail.start_item if detail is not None else 1
+    last = min(snapshot.rows, (detail.last_item if detail is not None else 0) or snapshot.rows)
     positions = list(range(first, last + 1))
     chunks = [
         positions[index : index + items_per_task]
@@ -174,8 +173,7 @@ def _list_tasks(
         raise PlanningError(f"{name} has no links; pass an input file with detail rows")
     pagination = page.pagination
     if definition.discovery.enabled:
-        if pagination.url_template is None:
-            raise PlanningError(f"{name}: discovery needs pagination.url_template")
+        # Without an address template only the package's discover_last_page can search.
         return _discover_tasks(run_id, name, links, max_attempts)
     if pagination.url_template is not None and pagination.last_page and pages_per_task:
         return [

@@ -12,7 +12,7 @@ from dailyscraper.detection import (
     build_policy,
     state_for_navigation_error,
 )
-from dailyscraper.domain import PageOutcome, PageType
+from dailyscraper.domain import ErrorCategory, PageError, PageOutcome, PageState, PageType
 from dailyscraper.execution.timing import Pacer
 from dailyscraper.pages import PageStateRules, compile_list_template
 from dailyscraper.schema import ScraperDefinition
@@ -152,17 +152,47 @@ class Navigator:
         version = self.actions.bootstrap_version()
         if not version or version in self._bootstrapped_versions:
             return False
-        self._bootstrapped_versions.add(version)
         if self._done_recently("bootstrap", version):
             logger.info("Session bootstrap skipped: done recently in this profile")
+            self._bootstrapped_versions.add(version)
             return False
         if self.actions.validate_bootstrap(url) is True:
+            self._bootstrapped_versions.add(version)
             self._remember("bootstrap", version)
             return False
         logger.info("Session bootstrap started: version=%s target=%s", version, url)
-        reopen = bool(self.actions.bootstrap(url))
+        try:
+            reopen = bool(self.actions.bootstrap(url))
+        except PageError as error:
+            if error.category is not ErrorCategory.CAPTCHA or not self._solved_in_bootstrap(error):
+                raise
+            logger.info("Session bootstrap continues after the challenge")
+            reopen = bool(self.actions.bootstrap(url))
+        self._bootstrapped_versions.add(version)
         self._remember("bootstrap", version)
         return reopen
+
+    def _solved_in_bootstrap(self, error: PageError) -> bool:
+        """A person solves the challenge the package's preparation ran into."""
+        intervention = self.waiter.intervention
+        if intervention is None:
+            return False
+        challenge = PageOutcome(PageState.CAPTCHA, PageType.LIST, self.page.url, error.reason)
+        resolved = intervention(challenge, self._bootstrap_state)
+        if resolved.state is not PageState.READY:
+            return False
+        self.page.forget_navigation_status()
+        return True
+
+    def _bootstrap_state(self) -> PageOutcome:
+        outcome = self.actions.probe_bootstrap_state()
+        if outcome is not None:
+            return outcome
+        # Preparation pages are not catalog pages: only the challenge itself counts.
+        outcome = self.waiter.probe(self.policy(PageType.LIST), ignore_status=True)
+        if outcome.state is PageState.CAPTCHA:
+            return outcome
+        return replace(outcome, state=PageState.READY, reason="challenge_gone")
 
     def _done_recently(self, key: str, version: str) -> bool:
         if self.profile_state is None:

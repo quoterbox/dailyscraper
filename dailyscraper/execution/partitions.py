@@ -206,7 +206,12 @@ class PartitionSink:
         self.attempt_id = attempt_id
 
     def emit(
-        self, item: dict[str, Any], *, input_row: int | None = None, status: str | None = None
+        self,
+        item: dict[str, Any],
+        *,
+        input_row: int | None = None,
+        status: str | None = None,
+        part: int = 0,
     ) -> None:
         status = status or OK_STATUS
         if not self._pending:
@@ -218,6 +223,7 @@ class PartitionSink:
                 "input_row": input_row,
                 "status": status,
                 "data": item,
+                **({"part": part} if part else {}),
             }
         )
         self.statuses[status] += 1

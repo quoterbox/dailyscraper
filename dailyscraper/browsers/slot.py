@@ -9,6 +9,7 @@ import os
 import signal
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
+from dataclasses import replace
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
@@ -199,6 +200,15 @@ def _serve(
 
 
 def run_task(pipeline: DefaultPipeline, task: RunTask, config: SlotConfig) -> TaskOutcome:
+    outcome = _run_task(pipeline, task, config)
+    warnings = pipeline.run_warnings()
+    if not warnings:
+        return outcome
+    details = {**outcome.details, "warnings": list(warnings[:MAX_FAILURES_PER_TASK])}
+    return replace(outcome, details=details)
+
+
+def _run_task(pipeline: DefaultPipeline, task: RunTask, config: SlotConfig) -> TaskOutcome:
     payload = task.payload
     try:
         if task.kind is TaskKind.LIST:

@@ -27,13 +27,14 @@ def test_pytest_session_runs_in_isolated_testing_environment(project_root: Path)
     assert workspace.is_relative_to(project_root / ".test-artifacts")
 
 
-@pytest.mark.parametrize(
-    "protected",
-    [Path("data"), Path("logs"), Path("scrapers"), Path("config") / "development"],
-)
-def test_testing_workspace_rejects_development_paths(project_root: Path, protected: Path) -> None:
-    with pytest.raises(RuntimeError, match="protected development path"):
-        validate_testing_workspace(project_root / protected / "pytest", project_root=project_root)
+def test_testing_workspace_rejects_development_paths(project_root: Path) -> None:
+    # The development config, local overrides included, says where these folders are.
+    protected = development_paths(project_root)
+
+    assert len(protected) == 4
+    for path in protected:
+        with pytest.raises(RuntimeError, match="protected development path"):
+            validate_testing_workspace(path / "pytest", project_root=project_root)
 
 
 def make_development_config(project: Path, paths: dict[str, str]) -> Path:

@@ -620,6 +620,12 @@ class RunService:
                     for task in own
                     if task.kind is TaskKind.DISCOVER and task.task_id in final
                 ],
+                "warnings": [
+                    warning
+                    for task in own
+                    if task.task_id in final
+                    for warning in final[task.task_id].details.get("warnings", ())
+                ],
                 "interventions": {
                     result: count
                     for (scraper, result), count in sorted(interventions.items())

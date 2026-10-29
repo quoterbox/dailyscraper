@@ -136,6 +136,43 @@ def test_package_actions_may_use_relative_imports(tmp_path: Path) -> None:
     assert actions_class.marker == "from-api"
 
 
+def test_a_local_file_changes_the_package_for_trial_runs(tmp_path: Path) -> None:
+    package = make_package(tmp_path, "trial_shop", {})
+    (package.root / "scraper.local.json").write_text(
+        json.dumps({"website": "https://trial.test", "pages": {"detail": {"start_item": 3}}}),
+        encoding="utf-8",
+    )
+
+    trial = load_scraper_package(package.root, variables={})
+
+    assert trial.definition.website == "https://trial.test"
+    assert trial.definition.pages.detail.start_item == 3
+    assert trial.definition.pages.detail.templates[0].name == "d"
+    assert trial.version != package.version
+
+
+def test_packages_share_code_from_a_common_folder(tmp_path: Path) -> None:
+    common = tmp_path / "common"
+    common.mkdir()
+    (common / "shop.py").write_text("MARKER = 'shared'\n", encoding="utf-8")
+    package = make_package(
+        tmp_path,
+        "shared_shop",
+        {
+            "actions.py": (
+                "from dailyscraper.actions import ScraperActions\n"
+                "from ..common.shop import MARKER\n\n"
+                "class Actions(ScraperActions):\n"
+                "    marker = MARKER\n"
+            ),
+        },
+    )
+
+    assert load_package_class(package, "actions", "Actions", ScraperActions).marker == "shared"
+    (common / "shop.py").write_text("MARKER = 'changed'\n", encoding="utf-8")
+    assert load_scraper_package(package.root, variables={}).version != package.version
+
+
 @pytest.mark.parametrize(
     ("code", "message"),
     [

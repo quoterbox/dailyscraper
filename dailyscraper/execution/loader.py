@@ -33,6 +33,11 @@ def load_package_class[T](
 def _import(package: ScraperPackage, module: str) -> ModuleType:
     parent = f"{PACKAGES_NAMESPACE}.{package.name}"
     _register_package(PACKAGES_NAMESPACE, None)
+    # Sibling folders such as ``common/`` hold code several packages share:
+    # ``from ..common.ozon import OzonActions``.
+    shared = sys.modules[PACKAGES_NAMESPACE].__path__
+    if str(package.root.parent) not in shared:
+        shared.append(str(package.root.parent))
     _register_package(parent, package.root)
     try:
         return importlib.import_module(f"{parent}.{module}")

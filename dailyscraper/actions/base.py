@@ -11,7 +11,8 @@ class ScraperActions:
     """Hooks a scraper package overrides in its ``actions.py`` as ``class Actions``.
 
     Every hook is a no-op by default. ``check_interrupted`` must be called by
-    long-running hooks so a stop request is honoured.
+    long-running hooks so a stop request is honoured. A hook that finds a
+    problem on the page raises ``PageError`` with its category.
     """
 
     def __init__(
@@ -25,6 +26,16 @@ class ScraperActions:
         self.finder = finder
         self.options = options
         self.check_interrupted = check_interrupted
+        self._opener: Callable[[str, PageType], PageOutcome] | None = None
+
+    def attach_opener(self, opener: Callable[[str, PageType], PageOutcome]) -> None:
+        self._opener = opener
+
+    def open_page(self, url: str, page_type: PageType = PageType.LIST) -> PageOutcome:
+        """Opens a page as the framework does: warmup, bootstrap, state checks, captcha waits."""
+        if self._opener is None:
+            raise RuntimeError("pages can be opened only inside a running session")
+        return self._opener(url, page_type)
 
     def before_run(self) -> None:
         pass
@@ -42,6 +53,9 @@ class ScraperActions:
         return False
 
     def probe_bootstrap_state(self) -> PageOutcome | None:
+        """The state of the page ``bootstrap`` left open, checked while a person solves the
+        challenge ``bootstrap`` reported with ``PageError(ErrorCategory.CAPTCHA, ...)``.
+        """
         return None
 
     def filter_links(self, links: list[str]) -> list[str]:
@@ -77,19 +91,30 @@ class ScraperActions:
     def prepare_output(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return items
 
-    def collect_list(self, url: str) -> list[dict[str, Any]] | None:
+    def collect_list(self, url: str, pages: tuple[int, int]) -> list[dict[str, Any]] | None:
+        """The link's items collected by the package, e.g. through the site's API.
+
+        Called once the link's page is open and ready; ``pages`` is the first
+        and the last page to collect, ``0`` as the last meaning up to the end.
+        ``None`` lets the framework read the catalog pages.
+        """
         return None
 
-    def collect_from_input(self, items: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    def collect_from_input(self, row: dict[str, Any]) -> list[dict[str, Any]] | None:
+        """Items for one input row of a package without a detail page; ``[]`` is not found."""
         return None
 
     def item_key(self, item: dict[str, Any]) -> str | None:
         """The item's own key for telling repeated catalog pages apart, e.g. a product id."""
         return None
 
-    def discover_last_page(self, url: str) -> int | None:
-        """The link's last catalog page found by the package itself, e.g. from an API."""
+    def discover_last_page(self, url: str, start: int, limit: int) -> int | None:
+        """The link's last catalog page between ``start`` and ``limit`` found by the package
+        itself, e.g. from an API; below ``start`` means the link has no items. ``open_page``
+        opens the link when the package needs it open.
+        """
         return None
 
     def run_warnings(self) -> list[dict[str, Any]]:
+        """Package warnings since the previous call; asked after every task."""
         return []

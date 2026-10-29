@@ -57,3 +57,4 @@
 | [0017](decisions/0017-proxies.md) | Прокси: пул, здоровье, выбор и изоляция сессий | принято |
 | [0018](decisions/0018-manual-interventions-and-notifications.md) | Ручное вмешательство и уведомления | принято |
 | [0019](decisions/0019-gates-discovery-and-probe.md) | Ворота, discovery и probe | принято |
+| [0020](decisions/0020-live-packages-and-hook-contract.md) | Боевые пакеты и контракт хуков | принято |

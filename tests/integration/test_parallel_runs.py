@@ -35,6 +35,17 @@ def test_list_tasks_run_in_slots_and_are_exported(settings, store, project_root)
     assert summary["statuses"] == {"ok": 6}
 
 
+def test_package_warnings_reach_the_run_summary(settings, store, project_root) -> None:
+    warning = {"code": "wb_input_article_not_found", "article": "123"}
+    name = make_package(
+        settings, project_root, "catalog", "list", {"rows": 1, "warnings": [warning]}
+    )
+
+    report = run(settings, store, name)
+
+    assert report.run.summary["scrapers"][name]["warnings"] == [warning, warning]
+
+
 def test_detail_chunks_run_in_parallel_and_keep_input_order(
     settings, store, project_root, scenario_workspace
 ) -> None:

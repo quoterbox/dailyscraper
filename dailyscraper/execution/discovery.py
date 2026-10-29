@@ -121,7 +121,8 @@ class PageChecker:
 
     ``read_items`` gets each page found with items while it is open, so its
     items need no second visit; it may overrule the page's kind, e.g. when the
-    page repeats an earlier one.
+    page repeats an earlier one. ``after_open`` gets each page's address right
+    after it opens, as the package's ``after_first_open`` does for a link.
     """
 
     def __init__(
@@ -132,10 +133,12 @@ class PageChecker:
         pacer: Pacer,
         *,
         read_items: PageReader | None = None,
+        after_open: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.navigator = navigator
         self.read_items = read_items
+        self.after_open = after_open
         self.page_url = page_url
         self.settings = settings
         self.pacer = pacer
@@ -159,7 +162,13 @@ class PageChecker:
 
     def _once(self, page: int) -> PageCheck:
         url = self.page_url(page)
-        outcome = self.navigator.open(url, PageType.LIST, allow_reload=False)
+        navigation = self.navigator.navigate(url)
+        if navigation.ok:
+            if self.after_open is not None:
+                self.after_open(url)
+            outcome = self.navigator.wait(PageType.LIST, allow_reload=False)
+        else:
+            outcome = self.navigator.failed_open(url, PageType.LIST, navigation.error)
         deadline = self._clock() + self.settings.probe_wait_seconds
         while outcome.state in {PageState.UNKNOWN, PageState.LOADING} and self._clock() < deadline:
             self.pacer.pause(max(self.settings.settle_seconds, 0.5))

@@ -11,7 +11,8 @@ the process after so many committed rows), ``hang`` (stop reporting),
 input position), ``captcha`` (a list page shows a challenge that a person solves
 after ``solve_after`` checks, or never when it is ``null``), ``last_page`` or
 ``discover`` (``{"status": "blocked", "last_page": 2}``) for discovery, ``probe``
-(``{"ok": false, "category": "invalid_content"}``) for the health probe.
+(``{"ok": false, "category": "invalid_content"}``) for the health probe,
+``warnings`` for the package warnings after each task.
 ``proxies`` overrides the behaviour for a proxy id. A list task with a page range
 gives each row a ``pages`` field.
 """
@@ -73,6 +74,9 @@ class FakePipeline:
             **self.options.get("attempts", {}).get(attempt, {}),
             **self.options.get("proxies", {}).get(self.proxy_id, {}),
         }
+
+    def run_warnings(self) -> list[dict[str, Any]]:
+        return list(self.behaviour().get("warnings", ()))
 
     def run_links(self, links: list[str], *, pages=None) -> PipelineResult:
         behaviour = self.behaviour()

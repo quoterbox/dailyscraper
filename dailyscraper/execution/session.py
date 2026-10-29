@@ -53,6 +53,7 @@ def open_pipeline(
             ),
             profile_state=ProfileState(plan.profile_dir) if plan and plan.profile_dir else None,
         )
+        actions.attach_opener(navigator.open)
         yield pipeline_class(
             PageContext(
                 definition=package.definition,

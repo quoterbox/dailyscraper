@@ -8,9 +8,18 @@ from typing import Any, Protocol, TextIO
 
 class ItemSink(Protocol):
     def emit(
-        self, item: dict[str, Any], *, input_row: int | None = None, status: str | None = None
+        self,
+        item: dict[str, Any],
+        *,
+        input_row: int | None = None,
+        status: str | None = None,
+        part: int = 0,
     ) -> None:
-        """``input_row`` is the 1-based input position of a detail row, ``status`` its outcome."""
+        """``input_row`` is the 1-based input position of a detail row, ``status`` its outcome.
+
+        ``part`` numbers the rows one input row produced: part 0 replaces what
+        earlier attempts saved for it, later parts are added to it.
+        """
         ...
 
 
@@ -30,7 +39,12 @@ class MemorySink:
         return [row.item for row in self.rows]
 
     def emit(
-        self, item: dict[str, Any], *, input_row: int | None = None, status: str | None = None
+        self,
+        item: dict[str, Any],
+        *,
+        input_row: int | None = None,
+        status: str | None = None,
+        part: int = 0,
     ) -> None:
         self.rows.append(EmittedRow(dict(item), input_row, status))
 
@@ -52,7 +66,12 @@ class JsonLinesSink:
             self._stream = None
 
     def emit(
-        self, item: dict[str, Any], *, input_row: int | None = None, status: str | None = None
+        self,
+        item: dict[str, Any],
+        *,
+        input_row: int | None = None,
+        status: str | None = None,
+        part: int = 0,
     ) -> None:
         if self._stream is None:
             raise RuntimeError("JsonLinesSink must be opened with 'with' before emitting")

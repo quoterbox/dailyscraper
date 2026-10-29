@@ -11,7 +11,7 @@ from dailyscraper.detection.markers import (
     find_marker,
     has_proxy_auth_status,
 )
-from dailyscraper.domain import ErrorCategory, PageState
+from dailyscraper.domain import ErrorCategory, PageError, PageState
 from dailyscraper.transport.errors import is_browser_closed_error, is_timeout_error
 
 STATE_CATEGORIES = {
@@ -48,6 +48,8 @@ HTTP_CATEGORIES = {
 
 
 def classify_error(error: BaseException | str) -> ErrorCategory:
+    if isinstance(error, PageError):
+        return error.category
     if isinstance(error, ConnectionError):
         return ErrorCategory.NETWORK
     # urllib errors are OSErrors carrying the URL as a filename; they are not file problems.

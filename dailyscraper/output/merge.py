@@ -38,21 +38,27 @@ def scraper_rows(
 ) -> Iterator[Row]:
     """Final rows of one scraper in a run.
 
-    Without an input the rows follow commit order. With an input every input
-    row appears once, in input order, replaced by its latest committed detail
-    result; rows without a result keep the input values.
+    Without an input the rows follow commit order. With an input the rows
+    follow input order: each input row is replaced by its latest committed
+    result, which is one detail row or every item a package collected for it;
+    rows without a result keep the input values.
     """
     records = scraper_records(registry, layout, run_id, scraper, snapshot)
     if snapshot is None:
         for record in records:
             yield record["data"]
         return
-    latest: dict[int, Row] = {}
+    latest: dict[int, list[Row]] = {}
     for record in records:
-        if record.get("input_row") is not None:
-            latest[record["input_row"]] = record["data"]
+        position = record.get("input_row")
+        if position is None:
+            continue
+        if record.get("part"):
+            latest.setdefault(position, []).append(record["data"])
+        else:
+            latest[position] = [record["data"]]
     for position, row in enumerate(snapshot.iter_rows(), start=1):
-        yield latest.get(position, row)
+        yield from latest.get(position, [row])
 
 
 def latest_attempt_commits(commits: list[CommitRecord]) -> list[CommitRecord]:

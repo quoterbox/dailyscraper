@@ -8,7 +8,7 @@ from dailyscraper.domain.artifacts import (
     PartitionSeal,
     PartitionState,
 )
-from dailyscraper.domain.errors import ErrorCategory
+from dailyscraper.domain.errors import ErrorCategory, PageError
 from dailyscraper.domain.events import (
     EVENT_SCHEMA_VERSION,
     DeliveryRecord,
@@ -61,6 +61,7 @@ __all__ = [
     "Notification",
     "NotificationRecord",
     "NotificationStatus",
+    "PageError",
     "PageOutcome",
     "PageState",
     "PageType",
