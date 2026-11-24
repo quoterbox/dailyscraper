@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Loaded as a pytest plugin (``-p tests.bootstrap``) so it runs before collection."""
 
 from __future__ import annotations

@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """A real Chromium waits on a CAPTCHA page until a person solves it, notified via Telegram.
 
 The page is served locally: it shows a challenge until the test, playing the

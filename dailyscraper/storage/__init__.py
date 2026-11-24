@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Storage contracts and their implementations; SQLite and local files first."""
 
 from pathlib import Path

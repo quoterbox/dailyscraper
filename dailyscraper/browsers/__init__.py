@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Slot processes: one browser session each, managed by the parent within host limits."""
 
 from dailyscraper.browsers.manager import (

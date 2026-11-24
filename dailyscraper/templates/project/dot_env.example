@@ -1,0 +1,4 @@
+# Values for ${env:NAME} references in config/, e.g. a proxy password or a bot token.
+# Copy this file to .env; .env is not committed.
+# PROXY_PASSWORD=
+# TELEGRAM_BOT_TOKEN=

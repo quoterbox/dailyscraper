@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Finding a catalog's last page: doubling steps to the first empty page, then bisection."""
 
 from __future__ import annotations

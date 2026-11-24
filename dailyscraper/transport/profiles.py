@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Persistent browser profiles, one per site and proxy.
 
 A profile carries cookies and history tied to an exit identity. When the proxy

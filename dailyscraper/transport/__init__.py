@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Playwright adapter, element finder and manual interventions."""
 
 from dailyscraper.transport.browser import PlaywrightBrowser, SessionPlan

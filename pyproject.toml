@@ -1,9 +1,25 @@
 [project]
 name = "dailyscraper"
-version = "0.0.0"
-description = "Browser-based scraping framework for product catalogs and detail pages"
+version = "0.1.0a1"
+description = "Web scraping framework with one interface for browser (Playwright) and HTTP scraping, JSON-defined scrapers and proxy rotation"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.md", "THIRD_PARTY_LICENSES"]
 requires-python = ">=3.13"
+authors = [{ name = "JQ" }]
+keywords = [
+    "scraping", "web-scraping", "scraper", "scraping-framework", "crawler",
+    "data-extraction", "playwright", "http", "xpath", "proxy-rotation",
+    "parallel", "ecommerce",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+]
 dependencies = [
     "openpyxl>=3.1",
     "playwright==1.59.0",
@@ -11,6 +27,11 @@ dependencies = [
     "pydantic>=2.9",
     "python-dotenv>=1.0",
 ]
+
+[project.urls]
+Homepage = "https://dailyscraper.com/"
+Source = "https://github.com/quoterbox/dailyscraper"
+Issues = "https://github.com/quoterbox/dailyscraper/issues"
 
 [project.scripts]
 dailyscraper = "dailyscraper.app.cli:main"

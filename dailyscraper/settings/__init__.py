@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Environment selection, configuration loading and the immutable run snapshot."""
 
 from dailyscraper.settings.loader import SettingsError, load_settings, load_variables

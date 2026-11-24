@@ -1,11 +1,21 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dailyscraper.domain.limits import Dimension, LimitRule
+
+GROUP_NAME = re.compile(r"[a-z][a-z0-9_-]*")
 
 
 class SettingsModel(BaseModel):
@@ -20,6 +30,7 @@ class PathsSettings(SettingsModel):
 
 class ScraperSelection(SettingsModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
+    enabled: bool = Field(True, description="False keeps it out of a run without names")
     aliases: tuple[str, ...] = ()
     proxy_names: tuple[str, ...] = ()
     max_parallel: int | None = Field(None, ge=1)
@@ -400,6 +411,26 @@ class Settings(SettingsModel):
     interventions: InterventionSettings = InterventionSettings()
     notifications: NotificationsSettings = NotificationsSettings()
     scrapers: tuple[ScraperSelection, ...] = ()
+    groups: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _known_groups(self) -> Settings:
+        bad = [name for name in self.groups if not GROUP_NAME.fullmatch(name)]
+        if bad:
+            raise ValueError(f"group names must look like {GROUP_NAME.pattern}: {bad}")
+        empty = [name for name, members in self.groups.items() if not members]
+        if empty:
+            raise ValueError(f"groups without scrapers: {empty}")
+        return self
+
+    def scrapers_to_run(self, group: str | None = None) -> tuple[str, ...]:
+        """A group's scrapers, or every enabled scraper of ``scrapers.json``."""
+        if group is not None:
+            if group not in self.groups:
+                known = ", ".join(sorted(self.groups)) or "none"
+                raise ValueError(f"no group {group!r} in scrapers.json (groups: {known})")
+            return self.groups[group]
+        return tuple(selection.name for selection in self.scrapers if selection.enabled)
 
     def limit_rules(self) -> list[LimitRule]:
         """Built-in limits from ``max_slots``, ``max_parallel`` and

@@ -1,0 +1,42 @@
+# {{project_name}}
+
+A scraping project on [dailyscraper](https://dailyscraper.com).
+
+```
+config/development/   settings for runs on this machine
+config/production/    settings for the server (DAILYSCRAPER_ENV=production)
+scrapers/             scraper packages, one folder each
+data/                 results, run history, browser profiles (not committed)
+```
+
+First time:
+
+```
+uv sync
+uv run playwright install chromium
+```
+
+Run every scraper listed in `config/development/scrapers.json`:
+
+```
+uv run dailyscraper run
+```
+
+Run one scraper, with the browser window visible:
+
+```
+uv run dailyscraper run example_catalog --headed
+```
+
+Add a scraper package:
+
+```
+uv run dailyscraper new my_shop
+```
+
+Past runs and their results:
+
+```
+uv run dailyscraper runs
+uv run dailyscraper runs show RUN_ID
+```

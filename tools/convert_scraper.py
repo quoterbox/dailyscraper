@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Convert a previous-format scraper package config to scraper.json schema_version 3.
 
     uv run python tools/convert_scraper.py SOURCE_DIR TARGET_DIR

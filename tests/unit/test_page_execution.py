@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
 import json
@@ -151,13 +158,13 @@ def test_a_local_file_changes_the_package_for_trial_runs(tmp_path: Path) -> None
     assert trial.version != package.version
 
 
-def test_packages_share_code_from_a_common_folder(tmp_path: Path) -> None:
+def test_a_package_cannot_import_code_from_outside_its_folder(tmp_path: Path) -> None:
     common = tmp_path / "common"
     common.mkdir()
     (common / "shop.py").write_text("MARKER = 'shared'\n", encoding="utf-8")
     package = make_package(
         tmp_path,
-        "shared_shop",
+        "borrowing_shop",
         {
             "actions.py": (
                 "from dailyscraper.actions import ScraperActions\n"
@@ -168,9 +175,8 @@ def test_packages_share_code_from_a_common_folder(tmp_path: Path) -> None:
         },
     )
 
-    assert load_package_class(package, "actions", "Actions", ScraperActions).marker == "shared"
-    (common / "shop.py").write_text("MARKER = 'changed'\n", encoding="utf-8")
-    assert load_scraper_package(package.root, variables={}).version != package.version
+    with pytest.raises(PackageCodeError, match="cannot import"):
+        load_package_class(package, "actions", "Actions", ScraperActions)
 
 
 @pytest.mark.parametrize(

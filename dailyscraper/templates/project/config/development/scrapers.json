@@ -1,0 +1,6 @@
+{
+    "scrapers": [
+        {"name": "example_catalog"}
+    ],
+    "groups": {}
+}

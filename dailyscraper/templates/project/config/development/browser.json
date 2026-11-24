@@ -1,0 +1,7 @@
+{
+    "browser": {
+        "playwright": {
+            "headless": false
+        }
+    }
+}

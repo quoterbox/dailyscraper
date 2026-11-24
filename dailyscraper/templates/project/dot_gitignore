@@ -1,0 +1,24 @@
+# Python and tooling
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets and local overrides
+.env
+*.local.json
+.secrets.*
+
+# Runtime data
+data/
+logs/
+input/
+temp/
+*.sqlite*
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

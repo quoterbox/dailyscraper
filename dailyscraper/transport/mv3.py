@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Proxy authentication through a Manifest V3 extension, for persistent profiles.
 
 Playwright's own proxy authentication is unreliable in a persistent context, so

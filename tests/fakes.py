@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """A pipeline without a browser for slot and dispatcher tests.
 
 Slots import it by path (``tests.fakes:open_fake``). Its behaviour comes from

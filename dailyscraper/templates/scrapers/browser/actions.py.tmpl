@@ -1,0 +1,32 @@
+"""Site-specific code of {{scraper_name}}.
+
+scraper.json describes the site; this file is for what JSON cannot say. Every
+hook below is optional: delete the ones you do not need, or this whole file.
+The full list of hooks is the ScraperActions class in dailyscraper/actions/base.py.
+
+Inside a hook:
+    self.page             the browser page (self.page.body_text(), self.page.url)
+    self.finder           finds elements by the selectors of scraper.json
+    self.options          the "options" section of scraper.json
+    self.open_page(url)   opens a page the way the framework does
+    raise PageError(ErrorCategory.BLOCKED, "reason")   reports a problem on the page
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from dailyscraper.actions import ScraperActions
+
+
+class Actions(ScraperActions):
+    def after_first_open(self, url: str) -> None:
+        """Right after a catalog link opens: close a popup, scroll, choose a city."""
+
+    def prepare_list_item(self, item: dict[str, Any], url: str) -> dict[str, Any] | None:
+        """Each catalog item before it is saved; return None to skip it."""
+        return item
+
+    def prepare_output(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Rows right before they are written: add or clean up columns."""
+        return items

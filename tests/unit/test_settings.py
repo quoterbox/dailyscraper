@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
 import json
@@ -120,6 +127,38 @@ def test_env_file_supplies_references_and_process_environment_wins(
 )
 def test_invalid_settings_are_rejected(tmp_path: Path, files: dict, message: str) -> None:
     project = make_project(tmp_path, files)
+
+    with pytest.raises(SettingsError, match=message):
+        load_settings(project)
+
+
+def test_scrapers_json_lists_what_a_run_without_names_takes(tmp_path: Path) -> None:
+    scrapers = {
+        "scrapers": [
+            {"name": "ozon_daily"},
+            {"name": "ozon_weekly", "enabled": False},
+            {"name": "wb_daily"},
+        ],
+        "groups": {"weekly": ["ozon_weekly"]},
+    }
+    settings = load_settings(
+        make_project(tmp_path, {"paths.json": WORKSPACE_PATHS, "scrapers.json": scrapers})
+    )
+
+    assert settings.scrapers_to_run() == ("ozon_daily", "wb_daily")
+    assert settings.scrapers_to_run("weekly") == ("ozon_weekly",)
+    with pytest.raises(ValueError, match="no group 'daily'.*weekly"):
+        settings.scrapers_to_run("daily")
+
+
+@pytest.mark.parametrize(
+    ("groups", "message"),
+    [({"Daily Run": ["a"]}, "group names"), ({"daily": []}, "groups without scrapers")],
+)
+def test_bad_groups_are_rejected(tmp_path: Path, groups: dict, message: str) -> None:
+    project = make_project(
+        tmp_path, {"paths.json": WORKSPACE_PATHS, "scrapers.json": {"groups": groups}}
+    )
 
     with pytest.raises(SettingsError, match=message):
         load_settings(project)

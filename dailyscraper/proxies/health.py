@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Circuit breaker per pair (site, proxy), kept in the store so every run sees it.
 
 Blocks, captchas and proxy auth failures open the circuit at once; timeouts and

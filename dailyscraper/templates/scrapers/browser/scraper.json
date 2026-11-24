@@ -1,0 +1,35 @@
+{
+    "schema_version": 3,
+    "name": "{{scraper_name}}",
+    "website": "https://example.com",
+    "links": [
+        {
+            "id": "main",
+            "type": "list",
+            "urls": ["https://example.com/catalog/"]
+        }
+    ],
+    "pages": {
+        "list": {
+            "templates": [
+                {
+                    "name": "catalog",
+                    "ready": {"css": ".product"},
+                    "first_item": {
+                        "body": {"css": ".product"},
+                        "fields": {
+                            "item_name": {"css": ".product-title"},
+                            "detail_link": {"css": "a"},
+                            "price": {"css": ".price"}
+                        }
+                    },
+                    "next_page": {"css": "a.next"}
+                }
+            ],
+            "pagination": {
+                "start_page": 1,
+                "last_page": 0
+            }
+        }
+    }
+}

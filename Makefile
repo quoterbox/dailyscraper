@@ -1,4 +1,4 @@
-.PHONY: sync test test-network lint format check
+.PHONY: sync test test-network lint format headers licenses check
 
 sync:
 	uv sync
@@ -14,5 +14,11 @@ lint:
 
 format:
 	uv run ruff format .
+
+headers:
+	uv run python tools/license_headers.py --fix
+
+licenses:
+	uv run python tools/third_party_licenses.py --write
 
 check: lint test

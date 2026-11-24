@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
 import argparse
@@ -8,6 +15,12 @@ import sys
 from pathlib import Path
 
 from dailyscraper.app.run_service import RunRequest, RunService
+from dailyscraper.app.scaffold import (
+    ScaffoldError,
+    create_package,
+    create_project,
+    package_templates,
+)
 from dailyscraper.domain import RunStatus
 from dailyscraper.observability.notifications.channels import (
     Message,
@@ -31,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
+    if args.command == "init":
+        return _init(args.path, args.framework)
     settings = load_settings(Path.cwd())
+    if args.command == "new":
+        return _new(settings, args.name, args.template)
     if args.command == "notifications":
         return _test_notifications(settings)
     if getattr(args, "headed", False):
@@ -54,8 +71,44 @@ def main(argv: list[str] | None = None) -> int:
         store.close()
 
 
+def _init(path: Path, framework: Path | None) -> int:
+    try:
+        create_project(path, framework=framework)
+    except ScaffoldError as error:
+        print(error, file=sys.stderr)
+        return 2
+    print(f"Project created: {path.resolve()}")
+    print(f"Next: cd {path}, then uv sync, then uv run dailyscraper run example_catalog")
+    return 0
+
+
+def _new(settings: Settings, name: str, template: str) -> int:
+    try:
+        target = create_package(settings.paths.scrapers, name, template)
+    except ScaffoldError as error:
+        print(error, file=sys.stderr)
+        return 2
+    print(f"Package created: {target}")
+    print("Fill in scraper.json, then: uv run dailyscraper run " + name + " --headed")
+    return 0
+
+
 def _run(settings: Settings, store: Store, args: argparse.Namespace) -> int:
-    report = RunService(settings, store).run(RunRequest(tuple(args.scrapers), args.input))
+    if args.scrapers and args.group:
+        print("Give scraper names or --group, not both", file=sys.stderr)
+        return 2
+    try:
+        scrapers = tuple(args.scrapers) or settings.scrapers_to_run(args.group)
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 2
+    if not scrapers:
+        print(
+            "No scrapers to run: name them, or list them in config/<env>/scrapers.json",
+            file=sys.stderr,
+        )
+        return 2
+    report = RunService(settings, store).run(RunRequest(scrapers, args.input))
     run = report.run
     print(f"\nRun {run.run_id}: {run.status.value}")
     if run.error:
@@ -154,8 +207,23 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dailyscraper")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    run = commands.add_parser("run", help="run scraper packages in parallel slots")
-    run.add_argument("scrapers", nargs="+")
+    init = commands.add_parser("init", help="create a project folder from the template")
+    init.add_argument("path", type=Path)
+    init.add_argument(
+        "--framework", type=Path, help="depend on a local dailyscraper checkout while editing it"
+    )
+
+    new = commands.add_parser("new", help="create a scraper package in this project")
+    new.add_argument("name")
+    new.add_argument("--template", default="browser", choices=package_templates())
+
+    run = commands.add_parser(
+        "run",
+        help="run scraper packages in parallel slots",
+        description="Without names: every enabled scraper of scrapers.json.",
+    )
+    run.add_argument("scrapers", nargs="*")
+    run.add_argument("--group", help="the scrapers of a group from scrapers.json")
     run.add_argument(
         "--input", type=Path, help="CSV with detail rows instead of the links (one scraper)"
     )

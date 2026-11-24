@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
 import hashlib
@@ -19,7 +26,6 @@ LOCAL_SCRAPER_FILE = "scraper.local.json"
 PIPELINE_FILE = "pipeline.py"
 ACTIONS_FILE = "actions.py"
 VERSIONED_SUFFIXES = (".json", ".py")
-SHARED_DIRECTORY = "common"
 
 
 class ScraperPackageError(ValueError):
@@ -85,21 +91,15 @@ def load_scraper_package(root: Path, *, variables: Mapping[str, str]) -> Scraper
 
 
 def package_version(root: Path) -> str:
-    """Content hash of the package's ``.json`` and ``.py`` files and of the shared
-    ``common/`` code next to it, independent of their location.
-    """
-    root = Path(root)
+    """Content hash of the package's ``.json`` and ``.py`` files, independent of their location."""
     digest = hashlib.sha256()
-    shared = root.parent / SHARED_DIRECTORY
     files = sorted(
         path
-        for base in (root, shared)
-        for path in base.rglob("*")
+        for path in Path(root).rglob("*")
         if path.is_file() and path.suffix in VERSIONED_SUFFIXES and "__pycache__" not in path.parts
     )
     for path in files:
-        name = path.relative_to(root if path.is_relative_to(root) else root.parent)
-        digest.update(name.as_posix().encode("utf-8") + b"\0")
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n") + b"\0")
     return digest.hexdigest()[:16]
 

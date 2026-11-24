@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Page executors for list, detail and auth pages."""
 
 from dailyscraper.page_scrapers.auth_scraper import AuthPageScraper

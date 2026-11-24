@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 from __future__ import annotations
 
 import importlib
@@ -32,12 +39,8 @@ def load_package_class[T](
 
 def _import(package: ScraperPackage, module: str) -> ModuleType:
     parent = f"{PACKAGES_NAMESPACE}.{package.name}"
+    # A package is self-contained: relative imports reach only its own folder.
     _register_package(PACKAGES_NAMESPACE, None)
-    # Sibling folders such as ``common/`` hold code several packages share:
-    # ``from ..common.ozon import OzonActions``.
-    shared = sys.modules[PACKAGES_NAMESPACE].__path__
-    if str(package.root.parent) not in shared:
-        shared.append(str(package.root.parent))
     _register_package(parent, package.root)
     try:
         return importlib.import_module(f"{parent}.{module}")

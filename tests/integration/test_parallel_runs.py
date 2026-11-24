@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Runs through real slot processes with the browserless pipeline from ``tests.fakes``."""
 
 from __future__ import annotations
@@ -256,3 +263,38 @@ def test_site_and_proxy_limit_caps_slots(settings, store, project_root, scenario
 
     assert report.run.status is RunStatus.COMPLETED
     assert report.run.summary["slots"] == 1
+
+
+def test_a_run_without_names_takes_scrapers_json(
+    settings, store, project_root, monkeypatch, capsys
+) -> None:
+    for name in ("first", "second", "third"):
+        make_package(settings, project_root, name, "list", {"rows": 1})
+    settings = settings.model_copy(
+        update={
+            "scrapers": (
+                ScraperSelection(name="first"),
+                ScraperSelection(name="second", enabled=False),
+                ScraperSelection(name="third"),
+            ),
+            "groups": {"pair": ("first", "second")},
+        }
+    )
+    monkeypatch.setattr(cli, "load_settings", lambda root: settings)
+    monkeypatch.setattr(cli, "open_store", lambda *args, **kwargs: store)
+    monkeypatch.setattr(store, "close", lambda: None)
+    monkeypatch.setattr(
+        cli, "RunService", lambda settings, store: RunService(settings, store, opener=OPENER)
+    )
+
+    def scrapers_of_last_run() -> list[str]:
+        (latest, *_) = store.runs.list(limit=1)
+        return sorted(latest.summary["scrapers"])
+
+    assert cli.main(["run"]) == 0
+    assert scrapers_of_last_run() == ["first", "third"]
+    assert cli.main(["run", "--group", "pair"]) == 0
+    assert scrapers_of_last_run() == ["first", "second"]
+    assert cli.main(["run", "--group", "missing"]) == 2
+    assert cli.main(["run", "first", "--group", "pair"]) == 2
+    assert "no group 'missing'" in capsys.readouterr().err

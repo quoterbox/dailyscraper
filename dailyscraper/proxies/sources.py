@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Where the proxy pool comes from: a static list, a residential gateway or a provider API.
 
 Every source yields the same ``Proxy`` objects with stable ids, so allocation,

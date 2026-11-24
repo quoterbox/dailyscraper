@@ -1,3 +1,10 @@
+# Copyright (c) 2026 JQ.
+#
+# DailyScraper - https://dailyscraper.com
+# Source: https://github.com/quoterbox/dailyscraper
+#
+# SPDX-License-Identifier: MIT
+
 """Declarative page models: Page, ListPage, DetailPage, AuthPage."""
 
 from dailyscraper.pages.auth_page import AuthPage, AuthTemplate, Credentials
