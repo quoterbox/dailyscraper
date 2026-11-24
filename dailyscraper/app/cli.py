@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     if args.command == "init":
-        return _init(args.path, args.framework)
+        return _init(args.path, args.framework, args.branch)
     settings = load_settings(Path.cwd())
     if args.command == "new":
         return _new(settings, args.name, args.template)
@@ -71,9 +71,9 @@ def main(argv: list[str] | None = None) -> int:
         store.close()
 
 
-def _init(path: Path, framework: Path | None) -> int:
+def _init(path: Path, framework: Path | None, branch: str | None) -> int:
     try:
-        create_project(path, framework=framework)
+        create_project(path, framework=framework, branch=branch)
     except ScaffoldError as error:
         print(error, file=sys.stderr)
         return 2
@@ -209,8 +209,12 @@ def _parser() -> argparse.ArgumentParser:
 
     init = commands.add_parser("init", help="create a project folder from the template")
     init.add_argument("path", type=Path)
-    init.add_argument(
+    source = init.add_mutually_exclusive_group()
+    source.add_argument(
         "--framework", type=Path, help="depend on a local dailyscraper checkout while editing it"
+    )
+    source.add_argument(
+        "--branch", help="depend on a branch of the public repository instead of the PyPI release"
     )
 
     new = commands.add_parser("new", help="create a scraper package in this project")

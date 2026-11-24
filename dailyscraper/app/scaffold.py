@@ -13,6 +13,7 @@ The CLI and, later, the web interface call the same two functions.
 from __future__ import annotations
 
 import re
+from importlib.metadata import version
 from pathlib import Path
 
 TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
@@ -34,22 +35,36 @@ def package_templates() -> tuple[str, ...]:
     return tuple(sorted(path.name for path in PACKAGE_TEMPLATES.iterdir() if path.is_dir()))
 
 
-def create_project(target: Path, *, framework: Path | None = None) -> list[Path]:
+def create_project(
+    target: Path, *, framework: Path | None = None, branch: str | None = None
+) -> list[Path]:
     """A project folder with settings, an example package and a pyproject on dailyscraper.
 
-    ``framework`` is a local dailyscraper checkout to depend on while editing
-    both; without it the project depends on the public repository.
+    By default the project depends on the release on PyPI, starting from the
+    version that created it. ``framework`` is a local dailyscraper checkout to
+    depend on while editing both; ``branch`` is a branch of the public repository.
     """
     target = Path(target)
+    if framework is not None and branch is not None:
+        raise ScaffoldError("choose either a local framework checkout or a branch")
     if target.exists() and any(target.iterdir()):
         raise ScaffoldError(f"{target} is not empty")
+    requirement, source = "dailyscraper", ""
     if framework is not None:
         path = Path(framework).resolve().as_posix()
-        source = f'dailyscraper = {{ path = "{path}", editable = true }}'
+        source = f'{{ path = "{path}", editable = true }}'
+    elif branch is not None:
+        source = f'{{ git = "{REPOSITORY}", branch = "{branch}" }}'
     else:
-        source = f'dailyscraper = {{ git = "{REPOSITORY}", branch = "master" }}'
+        requirement = f"dailyscraper>={version('dailyscraper')}"
+    sources = f"\n\n[tool.uv.sources]\ndailyscraper = {source}" if source else ""
     name = re.sub(r"[^a-z0-9]+", "-", target.resolve().name.lower()).strip("-") or "scraping"
-    return _copy(PROJECT_TEMPLATE, target, {"project_name": name, "dailyscraper_source": source})
+    values = {
+        "project_name": name,
+        "dailyscraper_requirement": requirement,
+        "dailyscraper_sources": sources,
+    }
+    return _copy(PROJECT_TEMPLATE, target, values)
 
 
 def create_package(scrapers: Path, name: str, template: str = "browser") -> Path:

@@ -3,10 +3,7 @@ name = "{{project_name}}"
 version = "0.1.0"
 description = "Scraping project on dailyscraper"
 requires-python = ">=3.13"
-dependencies = ["dailyscraper"]
+dependencies = ["{{dailyscraper_requirement}}"]
 
 [tool.uv]
-package = false
-
-[tool.uv.sources]
-{{dailyscraper_source}}
+package = false{{dailyscraper_sources}}

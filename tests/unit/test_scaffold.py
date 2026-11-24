@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -38,8 +39,8 @@ def test_a_project_has_settings_an_example_and_a_pyproject_on_the_framework(
     } <= files
     pyproject = tomllib.loads((project / "pyproject.toml").read_text("utf-8"))
     assert pyproject["project"]["name"] == "my-scraping"
-    assert pyproject["project"]["dependencies"] == ["dailyscraper"]
-    assert pyproject["tool"]["uv"]["sources"]["dailyscraper"]["git"].endswith("/dailyscraper")
+    assert pyproject["project"]["dependencies"] == [f"dailyscraper>={version('dailyscraper')}"]
+    assert "sources" not in pyproject["tool"]["uv"]
     assert "data/" in (project / ".gitignore").read_text("utf-8").splitlines()
     scrapers = json.loads((project / "config/development/scrapers.json").read_text("utf-8"))
     assert [selection["name"] for selection in scrapers["scrapers"]] == ["example_catalog"]
@@ -50,7 +51,22 @@ def test_a_project_may_depend_on_a_local_checkout(tmp_path: Path, project_root: 
 
     pyproject = tomllib.loads((tmp_path / "work" / "pyproject.toml").read_text("utf-8"))
     source = pyproject["tool"]["uv"]["sources"]["dailyscraper"]
+    assert pyproject["project"]["dependencies"] == ["dailyscraper"]
     assert source == {"path": project_root.as_posix(), "editable": True}
+
+
+def test_a_project_may_depend_on_a_repository_branch(tmp_path: Path) -> None:
+    create_project(tmp_path / "work", branch="dev")
+
+    pyproject = tomllib.loads((tmp_path / "work" / "pyproject.toml").read_text("utf-8"))
+    source = pyproject["tool"]["uv"]["sources"]["dailyscraper"]
+    assert pyproject["project"]["dependencies"] == ["dailyscraper"]
+    assert source == {"git": "https://github.com/quoterbox/dailyscraper", "branch": "dev"}
+
+
+def test_a_project_takes_one_framework_source(tmp_path: Path, project_root: Path) -> None:
+    with pytest.raises(ScaffoldError, match="either"):
+        create_project(tmp_path / "work", framework=project_root, branch="dev")
 
 
 def test_a_project_is_not_created_over_existing_files(tmp_path: Path) -> None:
