@@ -17,8 +17,9 @@ from dailyscraper.proxies.sources import ProxyPool
 class ProxyAllocator:
     """The one place that orders proxies for a new session of a site.
 
-    Open circuits are skipped; the rest go healthy first, then unknown,
-    degraded and half-open, keeping the pool order within a rank. Proxies a
+    Proxies kept to other sites and open circuits are skipped; the rest go
+    healthy first, then unknown, degraded and half-open, keeping the pool
+    order within a rank. Proxies a
     task already failed on are avoided while others remain. ``None`` stands
     for the direct connection when no proxies are configured.
     """
@@ -32,7 +33,7 @@ class ProxyAllocator:
     ) -> list[Proxy | None]:
         if self.pool.empty:
             return [None]
-        proxies = self.pool.select(names)
+        proxies = self.pool.select(names, site)
         states = self.health.states(site, [proxy.proxy_id for proxy in proxies])
         now = self.health.store.now()
         usable: list[tuple[int, int, Proxy]] = []

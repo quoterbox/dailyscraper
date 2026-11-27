@@ -82,6 +82,20 @@ def test_blocked_proxy_is_opened_and_the_task_moves_on(settings, store, project_
     assert next_run.run.summary["scrapers"][name]["proxies"] == {"p2": 2}
 
 
+def test_an_idle_slot_on_a_proxy_to_avoid_makes_room_for_another(settings, store, project_root):
+    fake = {"rows": 2, "proxies": {"p1": {"rows": 0, "category": "load_failed"}}}
+    name = make_package(settings, project_root, "catalog", "list", fake)
+    settings = with_proxies(settings, static("p1", "p2"))
+
+    report = run(settings, store, name)
+
+    assert report.run.status is RunStatus.COMPLETED
+    rows = [row for path in report.outputs["csv"] for row in iter_csv(path)]
+    assert len(rows) == 4 and {row["proxy"] for row in rows} == {"p2"}
+    health = store.proxy_health.states("dailyscraper.com", ["p1"])
+    assert health["p1"].status is HealthStatus.DEGRADED
+
+
 def test_gateway_session_rotates_instead_of_resting(settings, store, project_root):
     fake = {"rows": 1, "proxies": {"res_01": {"rows": 0, "category": "captcha"}}}
     name = make_package(settings, project_root, "catalog", "list", fake)
@@ -141,6 +155,42 @@ def test_network_check_keeps_bad_proxies_out(
     assert checked["bad"]["category"] == "proxy_auth"
     bad_health = store.proxy_health.states("dailyscraper.com", ["bad"])["bad"]
     assert bad_health.status is HealthStatus.OPEN
+
+
+def test_site_locked_proxies_skip_the_network_check_and_stay_on_their_sites(
+    settings, store, project_root
+) -> None:
+    name = make_package(settings, project_root, "catalog", "list", {"rows": 1})
+    with ProgrammableConnectProxy("tunnel", credentials=("u", "pw")) as locked:
+        proxies = {
+            "source": "static",
+            "static": {
+                "default_auth": {"user": "u", "password": "pw"},
+                "items": [
+                    {
+                        "name": "locked",
+                        "host": locked.endpoint.host,
+                        "port": locked.endpoint.port,
+                        "allowed_sites": ["www.dailyscraper.com"],
+                        "site_locked": True,
+                    },
+                    {
+                        "name": "elsewhere",
+                        "host": "10.255.0.1",
+                        "port": 9001,
+                        "allowed_sites": ["shop.example"],
+                    },
+                ],
+            },
+        }
+        unreachable = ProxyCheckSettings(url="http://127.0.0.1:9/", timeout_seconds=2)
+        settings = with_proxies(settings, proxies, check=unreachable)
+
+        report = run(settings, store, name)
+
+    assert report.run.status is RunStatus.COMPLETED
+    assert set(report.run.summary["scrapers"][name]["proxies"]) == {"locked"}
+    assert store.events.list(report.run.run_id, types=["proxy.checked"]) == []
 
 
 def test_selected_proxies_limit_a_scraper(settings, store, project_root, scenario_workspace):

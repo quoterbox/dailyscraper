@@ -7,7 +7,6 @@
 
 """Declarative page models: Page, ListPage, DetailPage, AuthPage."""
 
-from dailyscraper.pages.auth_page import AuthPage, AuthTemplate, Credentials
 from dailyscraper.pages.common import ItemSample, Scroll
 from dailyscraper.pages.compiled import (
     CompiledDetailTemplate,
@@ -18,14 +17,15 @@ from dailyscraper.pages.compiled import (
     compile_detail_template,
     compile_list_template,
 )
-from dailyscraper.pages.detail_page import (
+from dailyscraper.pages.kinds.auth import AuthPage, AuthTemplate, Credentials
+from dailyscraper.pages.kinds.detail import (
     DetailPage,
     DetailTemplate,
     PropertyGroup,
     PropertySpec,
     property_output_field,
 )
-from dailyscraper.pages.list_page import ListPage, ListTemplate, Pagination, Repeats
+from dailyscraper.pages.kinds.list import ListPage, ListTemplate, Pagination, Repeats
 from dailyscraper.pages.selectors import Locator, PrepareMode, Selector, SelectorKind, ValuePrepare
 from dailyscraper.pages.state import PageStateRules
 from dailyscraper.pages.xpath import XPathError, derive_item_xpath, relative_to_item

@@ -17,7 +17,9 @@ import pytest
 from dailyscraper.actions import ScraperActions
 from dailyscraper.app.scaffold import ScaffoldError, create_package, create_project
 from dailyscraper.execution.loader import load_package_class
+from dailyscraper.proxies.sources import build_pool
 from dailyscraper.schema import load_scraper_package
+from dailyscraper.settings.models import ProxiesSettings
 
 
 def test_a_project_has_settings_an_example_and_a_pyproject_on_the_framework(
@@ -87,6 +89,21 @@ def test_the_example_is_the_controlled_catalog(tmp_path: Path, project_root: Pat
 
     assert example == {**controlled, "name": "example_catalog"}
     assert load_scraper_package(tmp_path / "work/scrapers/example_catalog", variables={})
+
+
+def test_the_proxy_example_is_valid_and_not_loaded(tmp_path: Path) -> None:
+    create_project(tmp_path / "work")
+    example = json.loads((tmp_path / "work/config/examples/proxies.json").read_text("utf-8"))
+
+    for source in ("static", "gateway"):
+        proxies = ProxiesSettings.model_validate({**example["proxies"], "source": source})
+        assert not build_pool(proxies).empty
+    settings = ProxiesSettings.model_validate(
+        json.loads((tmp_path / "work/config/development/proxies.json").read_text("utf-8"))[
+            "proxies"
+        ]
+    )
+    assert build_pool(settings).empty
 
 
 def test_a_new_package_loads_with_its_actions(tmp_path: Path) -> None:

@@ -1,0 +1,125 @@
+{
+    "proxies": {
+        "schema_version": 2,
+        "source": "static",
+        "static": {
+            "items": [
+                {
+                    "name": "proxy_1_ru",
+                    "host": "203.0.113.10",
+                    "port": 8000,
+                    "scheme": "http",
+                    "user": null,
+                    "password": null,
+                    "country_code": "RU",
+                    "allowed_sites": [],
+                    "site_locked": false
+                },
+                {
+                    "name": "proxy_2_ru",
+                    "host": "203.0.113.11",
+                    "port": 8000,
+                    "scheme": "http",
+                    "user": "${env:PROXY_2_RU_USER}",
+                    "password": "${env:PROXY_2_RU_PASSWORD}",
+                    "country_code": "RU",
+                    "allowed_sites": [],
+                    "site_locked": false
+                },
+                {
+                    "name": "proxy_1_shop",
+                    "host": "203.0.113.12",
+                    "port": 8000,
+                    "scheme": "http",
+                    "user": null,
+                    "password": null,
+                    "country_code": "RU",
+                    "allowed_sites": [
+                        "shop.example"
+                    ],
+                    "site_locked": true
+                }
+            ],
+            "default_auth": {
+                "user": "${env:PROXY_USER}",
+                "password": "${env:PROXY_PASSWORD}"
+            }
+        },
+        "gateway": {
+            "host": "gate.example.com",
+            "port": 10000,
+            "port_range": [
+                10000,
+                10015
+            ],
+            "scheme": "http",
+            "sessions": 16,
+            "user": "${env:GATEWAY_USER}",
+            "password": "${env:GATEWAY_PASSWORD}",
+            "session_template": "{user}_c_RU_s_{session}_ttl_30m",
+            "password_template": null,
+            "session_id_template": "{salt}{index:02d}g{generation}",
+            "name_template": "res_{index:02d}",
+            "session_salt": "ds",
+            "country_code": "RU"
+        },
+        "api": {
+            "url": null,
+            "url_env": "PROXY_API_URL",
+            "method": "GET",
+            "timeout_seconds": 15.0,
+            "headers": {},
+            "token": null,
+            "token_env": "PROXY_API_TOKEN",
+            "token_header": "Authorization",
+            "token_header_template": "Bearer {token}",
+            "items_field": "data.items",
+            "field_map": {
+                "name": "title",
+                "host": "ip",
+                "port": "port",
+                "user": "login",
+                "password": "password",
+                "country_code": "geo.country"
+            },
+            "host": null,
+            "port": null,
+            "scheme": "http",
+            "default_auth": {
+                "user": null,
+                "password": null
+            },
+            "fallback_to_static": true
+        }
+    },
+    "proxy_health": {
+        "consecutive_failures_to_open": 2,
+        "cooldown_seconds": 300.0,
+        "max_cooldown_seconds": 1800.0,
+        "backoff_factor": 2.0,
+        "immediate_open_categories": [
+            "proxy_auth",
+            "blocked",
+            "captcha"
+        ],
+        "tracked_categories": [
+            "timeout",
+            "network",
+            "load_failed",
+            "blank",
+            "rate_limited",
+            "browser_closed"
+        ]
+    },
+    "proxy_check": {
+        "enabled": true,
+        "url": "https://api.ipify.org?format=json",
+        "ip_field": "ip",
+        "timeout_seconds": 15.0,
+        "parallel": 8,
+        "min_healthy_total": 1,
+        "min_healthy_ratio": 0.1,
+        "min_healthy_per_scraper": 1,
+        "min_healthy_ratio_per_scraper": 0.1
+    }
+}

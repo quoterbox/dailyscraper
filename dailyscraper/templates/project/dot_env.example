@@ -1,4 +1,10 @@
 # Values for ${env:NAME} references in config/, e.g. a proxy password or a bot token.
-# Copy this file to .env; .env is not committed.
+# Copy this file to .env; .env is not committed. Names as in config/examples/.
+# PROXY_USER=
 # PROXY_PASSWORD=
+# PROXY_API_URL=
+# PROXY_API_TOKEN=
 # TELEGRAM_BOT_TOKEN=
+# TELEGRAM_CHAT_ID=
+# SMTP_USER=
+# SMTP_PASSWORD=

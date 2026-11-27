@@ -20,6 +20,8 @@ class Proxy:
 
     ``proxy_id`` is stable across runs; for a rotating gateway session the exit
     IP behind it changes with ``generation``, which is part of the credentials.
+    ``allowed_sites`` keeps a proxy to those sites; a ``site_locked`` one cannot
+    reach anything else, so a general network check says nothing about it.
     """
 
     proxy_id: str
@@ -32,6 +34,11 @@ class Proxy:
     source: str = "static"
     rotating: bool = False
     generation: int = 0
+    allowed_sites: tuple[str, ...] = ()
+    site_locked: bool = False
+
+    def allows(self, site: str) -> bool:
+        return not self.allowed_sites or site in self.allowed_sites
 
     @property
     def server(self) -> str:

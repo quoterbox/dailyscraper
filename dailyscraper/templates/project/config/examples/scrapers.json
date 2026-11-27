@@ -1,0 +1,21 @@
+{
+    "scrapers": [
+        {
+            "name": "example_catalog",
+            "enabled": true,
+            "aliases": [
+                "catalog"
+            ],
+            "proxy_names": [
+                "proxy_1_ru",
+                "proxy_2_ru"
+            ],
+            "max_parallel": 2
+        }
+    ],
+    "groups": {
+        "daily": [
+            "example_catalog"
+        ]
+    }
+}

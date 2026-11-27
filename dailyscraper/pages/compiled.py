@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from dailyscraper.pages.common import ItemSample
-from dailyscraper.pages.detail_page import DetailTemplate, PropertyGroup
-from dailyscraper.pages.list_page import ListTemplate
+from dailyscraper.pages.kinds.detail import DetailTemplate, PropertyGroup
+from dailyscraper.pages.kinds.list import ListTemplate
 from dailyscraper.pages.selectors import Locator, Selector, SelectorKind
 from dailyscraper.pages.xpath import XPathError, derive_item_xpath, is_relative, relative_to_item
 

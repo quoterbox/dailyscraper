@@ -1,0 +1,56 @@
+{
+    "browser": {
+        "args": [
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--disable-blink-features=AutomationControlled"
+        ],
+        "user_agent": null,
+        "open_attempts": 2,
+        "isolation": "ephemeral",
+        "playwright": {
+            "headless": true,
+            "channel": null,
+            "slow_mo_ms": 0,
+            "navigation_timeout_ms": 60000,
+            "default_timeout_ms": 10000,
+            "text_timeout_ms": 1500,
+            "attribute_timeout_ms": 1500,
+            "action_timeout_ms": 5000,
+            "typing_delay_ms": 30,
+            "wait_until": "domcontentloaded",
+            "viewport": {
+                "width": 1920,
+                "height": 1080
+            },
+            "locale": null,
+            "timezone_id": null
+        },
+        "stealth": {
+            "enabled": false
+        },
+        "resource_blocking": {
+            "enabled": true,
+            "resource_types": [
+                "image",
+                "media",
+                "font"
+            ],
+            "block_url_patterns": [
+                "*://*.doubleclick.net/*"
+            ],
+            "allow_url_patterns": [
+                "*://shop.example/static/*"
+            ]
+        },
+        "profiles": {
+            "reset_on_identity_change": true,
+            "bootstrap_ttl_seconds": 86400.0
+        },
+        "mv3": {
+            "readiness_timeout_ms": 10000,
+            "settle_ms": 300
+        }
+    }
+}

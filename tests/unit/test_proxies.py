@@ -203,6 +203,34 @@ def test_allocator_skips_open_ranks_and_avoids(tmp_path: Path) -> None:
     assert ProxyAllocator(ProxyPool(), health).candidates("a.ru") == [None]
 
 
+def test_proxies_kept_to_sites_are_offered_only_there(tmp_path: Path) -> None:
+    settings = ProxiesSettings.model_validate(
+        {
+            "source": "static",
+            "static": {
+                "items": [
+                    {"name": "any", "host": "10.0.0.1", "port": 8001},
+                    {
+                        "name": "shop",
+                        "host": "10.0.0.2",
+                        "port": 8002,
+                        "allowed_sites": [" WWW.Shop.ru "],
+                        "site_locked": True,
+                    },
+                ]
+            },
+        }
+    )
+    pool = build_pool(settings)
+    allocator = ProxyAllocator(pool, ProxyHealth(SQLiteStore(tmp_path / "s.sqlite"), POLICY))
+
+    assert pool.proxies[1].allowed_sites == ("shop.ru",) and pool.proxies[1].site_locked
+    assert [p.proxy_id for p in allocator.candidates("shop.ru")] == ["any", "shop"]
+    assert [p.proxy_id for p in allocator.candidates("other.ru")] == ["any"]
+    assert [p.proxy_id for p in allocator.candidates("other.ru", ["shop"])] == []
+    assert [p.proxy_id for p in pool.select(["shop", "any"], "other.ru")] == ["any"]
+
+
 def test_allocator_hands_out_the_current_gateway_session(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "s.sqlite")
     health = ProxyHealth(store, POLICY)

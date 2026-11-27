@@ -375,7 +375,8 @@ class RunService:
         used = {
             proxy.proxy_id: proxy
             for name in packages
-            for proxy in pool.select(self.settings.selected_proxies(name))
+            for proxy in pool.select(self.settings.selected_proxies(name), sites[name])
+            if not proxy.site_locked
         }
         results = check_proxies(list(used.values()), self.settings.proxy_check)
         for result in results:
@@ -390,8 +391,10 @@ class RunService:
                 seconds=round(result.seconds, 2),
             )
             if not result.ok:
+                proxy = used[result.proxy_id]
                 for site in set(sites.values()):
-                    health.open_now(site, used[result.proxy_id], result.category or "network")
+                    if proxy.allows(site):
+                        health.open_now(site, proxy, result.category or "network")
         failed = sum(1 for result in results if not result.ok)
         logger.info("Network check: %s of %s proxies failed", failed, len(results))
 
@@ -442,7 +445,7 @@ class RunService:
         usable_all: set[str] = set()
         for name in packages:
             names = self.settings.selected_proxies(name)
-            selected = {proxy.proxy_id for proxy in pool.select(names)}
+            selected = {proxy.proxy_id for proxy in pool.select(names, sites[name])}
             usable = {
                 proxy.proxy_id
                 for proxy in allocator.candidates(sites[name], names)

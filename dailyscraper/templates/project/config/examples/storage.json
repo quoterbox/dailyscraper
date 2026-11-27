@@ -1,0 +1,12 @@
+{
+    "storage": {
+        "backend": "sqlite",
+        "database": null,
+        "busy_timeout_ms": 30000,
+        "batch_rows": 100,
+        "batch_seconds": 5.0,
+        "partition_max_rows": 100000,
+        "partition_max_bytes": 134217728,
+        "fsync": true
+    }
+}

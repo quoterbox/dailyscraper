@@ -48,14 +48,17 @@ class ProxyPool:
     def empty(self) -> bool:
         return not self.proxies
 
-    def select(self, names: Collection[str] = ()) -> list[Proxy]:
-        if not names:
-            return list(self.proxies)
-        by_id = {proxy.proxy_id: proxy for proxy in self.proxies}
-        unknown = [name for name in names if name not in by_id]
-        if unknown:
-            raise ProxySourceError(f"unknown proxies {unknown}")
-        return [by_id[name] for name in dict.fromkeys(names)]
+    def select(self, names: Collection[str] = (), site: str | None = None) -> list[Proxy]:
+        """The named proxies (all without names), only those allowed for ``site`` if given."""
+        if names:
+            by_id = {proxy.proxy_id: proxy for proxy in self.proxies}
+            unknown = [name for name in names if name not in by_id]
+            if unknown:
+                raise ProxySourceError(f"unknown proxies {unknown}")
+            proxies = [by_id[name] for name in dict.fromkeys(names)]
+        else:
+            proxies = list(self.proxies)
+        return [proxy for proxy in proxies if site is None or proxy.allows(site)]
 
     def resolve(self, proxy: Proxy, generation: int) -> Proxy:
         """The proxy with the credentials of a session generation."""
@@ -108,6 +111,8 @@ def _static(settings: ProxiesSettings) -> tuple[Proxy, ...]:
             password=item.password or auth.password,
             country_code=item.country_code,
             source="static",
+            allowed_sites=item.allowed_sites,
+            site_locked=item.site_locked,
         )
         for item in settings.static.items
     )

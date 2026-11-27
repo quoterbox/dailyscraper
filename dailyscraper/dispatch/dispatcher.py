@@ -171,6 +171,10 @@ class Dispatcher:
             )
             if slot is None:
                 self.store.tasks.release(task.task_id)
+                spare = self.browsers.idle_slot(task.scraper)
+                if spare is not None:
+                    # Its proxy is one this task avoids, and it holds the place a new slot needs.
+                    self.browsers.retire(spare.slot_id)
                 return
             attempt = self.store.tasks.start(
                 task.task_id, slot_id=slot.slot_id, host_id=self.host_id, proxy_id=slot.proxy_id

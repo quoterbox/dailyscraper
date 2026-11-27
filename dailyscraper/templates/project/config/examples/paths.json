@@ -1,0 +1,8 @@
+{
+    "project_id": "default",
+    "paths": {
+        "data": "data",
+        "logs": "logs",
+        "scrapers": "scrapers"
+    }
+}

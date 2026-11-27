@@ -129,6 +129,7 @@ class BrowserManager:
     slots: dict[str, SlotHandle] = field(default_factory=dict)
     _numbers: dict[str, int] = field(default_factory=dict)
     _leases_renewed_at: float = 0.0
+    _held: dict[str, str] = field(default_factory=dict)
 
     def slots_of(self, scraper: str) -> list[SlotHandle]:
         return [slot for slot in self.slots.values() if slot.scraper == scraper]
@@ -164,7 +165,7 @@ class BrowserManager:
             return True
         free = self.available_memory_mb() - self.runtime.memory_reserve_mb
         if free < self.runtime.slot_memory_mb:
-            logger.info("Not starting a slot for %s: %.0f MB free", scraper, free)
+            self._hold(scraper, "memory", f"{free:.0f} MB free")
             return False
         return True
 
@@ -204,6 +205,7 @@ class BrowserManager:
             proxy=proxy,
         )
         self.slots[slot_id] = slot
+        self._held.pop(scraper, None)
         logger.info("Slot %s started (pid %s) via %s", slot_id, process.pid, slot.proxy_id)
         return slot
 
@@ -220,8 +222,15 @@ class BrowserManager:
             )
             if not full:
                 return proxy
-        logger.info("Not starting a slot for %s, limits reached: %s", scraper, ", ".join(full))
+        reason = "limits reached: " + ", ".join(full)
+        self._hold(scraper, reason, reason)
         return False
+
+    def _hold(self, scraper: str, kind: str, reason: str) -> None:
+        # The dispatcher asks again on every poll; one line per change of reason is enough.
+        if self._held.get(scraper) != kind:
+            self._held[scraper] = kind
+            logger.info("Not starting a slot for %s, %s", scraper, reason)
 
     def submit(self, slot: SlotHandle, task: Task, attempt: Attempt) -> None:
         self.send(

@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dailyscraper.domain.limits import Dimension, LimitRule
 
@@ -162,6 +162,17 @@ class StaticProxy(SettingsModel):
     user: str | None = None
     password: str | None = Field(None, repr=False)
     country_code: str | None = None
+    allowed_sites: tuple[str, ...] = Field(
+        (), description="Sites (domains such as ozon.ru) this proxy is used for; empty: any"
+    )
+    site_locked: bool = Field(
+        False, description="Works only for its sites: skipped by the general network check"
+    )
+
+    @field_validator("allowed_sites")
+    @classmethod
+    def _site_keys(cls, sites: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(site.strip().lower().removeprefix("www.") for site in sites)
 
 
 class StaticSource(SettingsModel):

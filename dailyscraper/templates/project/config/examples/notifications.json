@@ -1,0 +1,69 @@
+{
+    "notifications": {
+        "enabled": false,
+        "channels": [
+            {
+                "type": "telegram",
+                "name": "telegram",
+                "enabled": true,
+                "bot_token_env": "TELEGRAM_BOT_TOKEN",
+                "chat_id_env": "TELEGRAM_CHAT_ID",
+                "api_root": "https://api.telegram.org",
+                "timeout_seconds": 10.0
+            },
+            {
+                "type": "email",
+                "name": "email",
+                "enabled": true,
+                "host": "smtp.example.com",
+                "port": 587,
+                "encryption": "starttls",
+                "username_env": "SMTP_USER",
+                "password_env": "SMTP_PASSWORD",
+                "from_address": "scraper@example.com",
+                "recipients": [
+                    "team@example.com"
+                ],
+                "subject_prefix": "[dailyscraper]",
+                "timeout_seconds": 10.0
+            }
+        ],
+        "events": {
+            "intervention_required": {
+                "enabled": true,
+                "urgency": "urgent",
+                "cooldown_seconds": 900.0,
+                "ttl_seconds": 900.0
+            },
+            "run_failed": {
+                "enabled": true,
+                "urgency": "urgent",
+                "cooldown_seconds": 60.0,
+                "ttl_seconds": 86400.0
+            },
+            "run_finished": {
+                "enabled": true,
+                "urgency": "normal",
+                "cooldown_seconds": 60.0,
+                "ttl_seconds": 21600.0
+            },
+            "run_stopped": {
+                "enabled": false,
+                "urgency": "normal",
+                "cooldown_seconds": 60.0,
+                "ttl_seconds": 3600.0
+            },
+            "run_started": {
+                "enabled": false,
+                "urgency": "normal",
+                "cooldown_seconds": 60.0,
+                "ttl_seconds": 3600.0
+            }
+        },
+        "dispatch_interval_seconds": 5.0,
+        "max_attempts": 5,
+        "retry_backoff_seconds": 30.0,
+        "max_retry_backoff_seconds": 900.0,
+        "drain_timeout_seconds": 15.0
+    }
+}

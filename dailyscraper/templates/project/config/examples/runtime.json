@@ -1,0 +1,37 @@
+{
+    "runtime": {
+        "host_id": null,
+        "max_slots": 4,
+        "max_parallel_per_scraper": 1,
+        "max_browsers_per_site_proxy": 1,
+        "slot_memory_mb": 400,
+        "memory_reserve_mb": 1024,
+        "items_per_task": 50,
+        "pages_per_task": 10,
+        "task_attempts": 3,
+        "retry_delay_seconds": 5.0,
+        "retry_max_delay_seconds": 120.0,
+        "stall_timeout_seconds": 600.0,
+        "task_deadline_seconds": 7200.0,
+        "slot_start_timeout_seconds": 120.0,
+        "stop_grace_seconds": 30.0,
+        "commit_ack_timeout_seconds": 60.0,
+        "lease_ttl_seconds": 60.0,
+        "poll_interval_seconds": 0.5,
+        "snapshots_per_slot": 20,
+        "slot_max_tasks": 0,
+        "slot_max_age_seconds": 0.0,
+        "limits": [
+            {
+                "name": "shop_browsers",
+                "scope": [
+                    "site"
+                ],
+                "limit": 2,
+                "match": {
+                    "site": "shop.example"
+                }
+            }
+        ]
+    }
+}

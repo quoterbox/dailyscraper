@@ -109,8 +109,10 @@ dailyscraper/
   domain/         исходы страниц и задач, категории ошибок, задачи, proxy id — чистые типы без I/O
   settings/       окружение, загрузка config/<env>/*.json, неизменяемый снимок
   schema/         модели scraper.json v3, runtime, workload; загрузка пакета парсера
-  pages/          модели страниц, селекторы, XPath, компиляция templates          ← SDK
-  page_scrapers/  исполнители List / Detail / Auth, registry, стратегии
+  pages/          модели страниц (kinds/: list, detail, auth), селекторы, XPath,  ← SDK
+                  компиляция templates
+  page_scrapers/  исполнители страниц (kinds/: list, detail, auth — по одному на вид
+                  из pages/kinds/), чтение значений, повторы страниц
   pipelines/      DefaultPipeline, PipelineContext                            ← SDK
   actions/        ScraperActions (hooks)                                      ← SDK
   execution/      SlotRuntime, Navigator, ItemSink, CompiledTemplate

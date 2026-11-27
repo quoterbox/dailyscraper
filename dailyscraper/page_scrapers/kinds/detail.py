@@ -23,7 +23,7 @@ from dailyscraper.pages import (
     compile_detail_template,
     property_output_field,
 )
-from dailyscraper.pages.detail_page import PROPERTY_NAME_FIELD, PROPERTY_VALUE_FIELD
+from dailyscraper.pages.kinds.detail import PROPERTY_NAME_FIELD, PROPERTY_VALUE_FIELD
 from dailyscraper.pages.xpath import is_relative
 from dailyscraper.transport import Element
 

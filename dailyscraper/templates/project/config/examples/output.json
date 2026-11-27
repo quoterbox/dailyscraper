@@ -1,0 +1,19 @@
+{
+    "output": {
+        "formats": [
+            "csv"
+        ],
+        "archive": false,
+        "deliveries": [
+            {
+                "name": "shared_folder",
+                "type": "folder",
+                "path": "exports/{date}",
+                "formats": null,
+                "archive": false,
+                "when": "success",
+                "attempts": 3
+            }
+        ]
+    }
+}

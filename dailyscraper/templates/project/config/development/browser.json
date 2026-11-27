@@ -1,7 +1,8 @@
 {
     "browser": {
         "playwright": {
-            "headless": false
+            "headless": false,
+            "slow_mo_ms": 150
         }
     }
 }

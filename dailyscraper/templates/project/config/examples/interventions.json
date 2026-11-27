@@ -1,0 +1,14 @@
+{
+    "interventions": {
+        "manual": {
+            "enabled": true,
+            "timeout_seconds": 600.0,
+            "poll_interval_seconds": 2.0,
+            "page_types": [
+                "list",
+                "detail"
+            ],
+            "allow_headless": false
+        }
+    }
+}
